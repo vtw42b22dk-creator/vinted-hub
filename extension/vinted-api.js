@@ -60,17 +60,24 @@ async function fetchAllUserItems(userId) {
     (p) => `/api/v2/wardrobe/${userId}/items?page=${p}&per_page=96`,
     (p) => `/api/v2/users/${userId}/items?page=${p}&per_page=96`,
     (p) => `/api/v2/users/${userId}/items?page=${p}&per_page=96&status=active`,
+    (p) => `/api/v2/wardrobe/${userId}/items?page=${p}&per_page=96&cond=active`,
+    (p) => `/api/v2/users/${userId}/items?page=${p}&per_page=96&status=sold`,
+    (p) => `/api/v2/wardrobe/${userId}/items?page=${p}&per_page=96&cond=sold`,
+    (p) => `/api/v2/users/${userId}/items?page=${p}&per_page=96&status=hidden`,
+    (p) => `/api/v2/wardrobe/${userId}/items?page=${p}&per_page=96&cond=hidden`,
+    (p) => `/api/v2/users/${userId}/items?page=${p}&per_page=96&status=reserved`,
   ]
 
   for (const buildUrl of endpoints) {
     try {
       let page = 1
       while (page <= 10) {
-        const data = await vintedFetch(buildUrl(page))
+        const url = buildUrl(page)
+        const data = await vintedFetch(url)
         const items = data.items || data.wardrobe_items || data.user_items || []
 
         for (const item of items) {
-          const mapped = mapItem(item)
+          const mapped = mapItem(item, url)
           if (!seen.has(mapped.id_artigo)) {
             seen.add(mapped.id_artigo)
             artigos.push(mapped)
@@ -157,9 +164,10 @@ function mapConversation(c, currentUserId) {
   }
 }
 
-function mapItem(item) {
+function mapItem(item, sourceUrl) {
   const id = String(item.id)
   const domain = window.location.origin
+  const urlHint = String(sourceUrl || '')
 
   return {
     id_artigo: id,
@@ -167,7 +175,7 @@ function mapItem(item) {
     marca: item.brand_title || item.brand?.title || null,
     tamanho: item.size_title || item.size?.title || null,
     preco_venda: parsePrice(item.price || item.total_item_price || item.price_amount),
-    status_artigo: mapItemStatus(item.status || item.state || item.is_closed),
+    status_artigo: mapItemStatus(item, urlHint),
     foto_url:
       item.photo?.url ||
       item.photo?.full_size_url ||
@@ -178,12 +186,28 @@ function mapItem(item) {
   }
 }
 
-function mapItemStatus(status) {
-  if (status === true || status === 1) return 'vendido'
-  const s = String(status || 'active').toLowerCase()
-  if (s.includes('sold') || s.includes('vendido') || s.includes('closed')) return 'vendido'
+function mapItemStatus(item, urlHint) {
+  const hint = urlHint.toLowerCase()
+
+  if (hint.includes('sold') || hint.includes('vendido')) return 'vendido'
+  if (hint.includes('hidden') || hint.includes('oculto')) return 'oculto'
+  if (hint.includes('reserved') || hint.includes('reserv')) return 'reservado'
+
+  if (item.is_sold === true || item.sold === true || item.item_closing_action === 'sold') return 'vendido'
+  if (item.is_hidden === true || item.is_visible === false || item.is_hidden === 1) return 'oculto'
+  if (item.is_reserved === true || item.reserved === true) return 'reservado'
+
+  const transaction = item.transaction || item.active_transaction || {}
+  if (transaction.status === 'completed' || transaction.status === 'sold') return 'vendido'
+  if (transaction.status === 'cancelled') return 'oculto'
+
+  if (item.status === true || item.status === 1) return 'vendido'
+  if (item.status === false || item.status === 0) return 'ativo'
+
+  const s = String(item.status || item.state || item.item_status || item.status_title || 'active').toLowerCase()
+  if (s.includes('sold') || s.includes('vendido') || s.includes('closed') || s.includes('completed')) return 'vendido'
   if (s.includes('reserv')) return 'reservado'
-  if (s.includes('hidden') || s.includes('oculto')) return 'oculto'
+  if (s.includes('hidden') || s.includes('oculto') || s.includes('deleted') || s.includes('eliminado')) return 'oculto'
   if (s.includes('draft') || s.includes('rascunho')) return 'rascunho'
   return 'ativo'
 }

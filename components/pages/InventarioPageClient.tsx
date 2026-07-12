@@ -12,6 +12,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import type { ArtigoVinted } from '@/lib/types'
 import { calcularMetricasVinted, filtrarArtigosInventario } from '@/lib/utils'
+import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
 
 type FiltroInventario = 'a_venda' | 'vendidos' | 'todos'
 
@@ -44,6 +45,8 @@ function InventarioContent() {
     load()
   }, [load])
 
+  useSupabaseRealtime(load, ['artigos_vinted'])
+
   const artigos = filtrarArtigosInventario(todos, filtro)
   const metrics = calcularMetricasVinted(todos)
 
@@ -57,7 +60,7 @@ function InventarioContent() {
 
   return (
     <>
-      <AutoRefresh intervalMs={30000} onRefresh={load} />
+      <AutoRefresh intervalMs={5000} onRefresh={load} />
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Inventário Auto-Sync</h2>

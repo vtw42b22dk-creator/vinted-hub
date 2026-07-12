@@ -6,6 +6,7 @@ import AppShell from '@/components/layout/AppShell'
 import DashboardClient from '@/components/DashboardClient'
 import { createClient } from '@/lib/supabase/client'
 import type { Artigo, InboxCounts } from '@/lib/types'
+import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
 import { calcularMetricas, calcularMetricasVinted, formatEuro } from '@/lib/utils'
 
 async function getInboxCounts(supabase: ReturnType<typeof createClient>): Promise<InboxCounts> {
@@ -58,6 +59,8 @@ export default function HomePageClient() {
   useEffect(() => {
     load()
   }, [load])
+
+  useSupabaseRealtime(load, ['conversas', 'artigos_vinted', 'artigos'])
 
   const metrics = calcularMetricas(artigos)
   const totalInbox =

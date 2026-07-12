@@ -4,8 +4,9 @@ import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import AutoRefresh from '@/components/layout/AutoRefresh'
-import InboxFilters, { InboxAutoCleanup, InboxList } from '@/components/inbox/InboxPanel'
+import InboxFilters, { InboxAutoCleanup, InboxList, LiveIndicator } from '@/components/inbox/InboxPanel'
 import { createClient } from '@/lib/supabase/client'
+import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
 import type { Conversa, InboxCounts, StatusInbox } from '@/lib/types'
 
 const VALID_FILTERS: StatusInbox[] = [
@@ -68,6 +69,8 @@ function InboxContent() {
     setLoading(false)
   }, [filtro])
 
+  const liveStatus = useSupabaseRealtime(load, ['conversas', 'artigos_vinted'])
+
   useEffect(() => {
     setLoading(true)
     load()
@@ -83,13 +86,16 @@ function InboxContent() {
 
   return (
     <>
-      <AutoRefresh intervalMs={30000} onRefresh={load} />
+      <AutoRefresh intervalMs={5000} onRefresh={load} />
       <div className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Mensagens & Negociações</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Atualiza automaticamente quando a Vinted sincroniza
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Mensagens & Negociações</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Atualiza em tempo real quando a extensão sincroniza a Vinted
+            </p>
+          </div>
+          <LiveIndicator status={liveStatus} />
         </div>
 
         {error && (
