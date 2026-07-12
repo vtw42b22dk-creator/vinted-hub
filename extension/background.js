@@ -1,5 +1,5 @@
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v0.2 instalada')
+  console.log('Vinted Hub Sync v0.4 instalada')
 })
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -11,13 +11,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 })
 
+const DEFAULT_FUNCTIONS_URL = 'https://varmqpsxxmwtuxwltppn.supabase.co/functions/v1'
+
 async function handleSync(explicitTabId) {
   const tab = await getVintedTab(explicitTabId)
   const tabId = tab.id
 
-  const stored = await chrome.storage.local.get(['apiUrl', 'syncSecret'])
-  const apiUrl = (stored.apiUrl || 'http://localhost:3000').replace(/\/$/, '')
-  const syncSecret = stored.syncSecret || 'revenda-sync-2026-secreto'
+  const stored = await chrome.storage.local.get(['functionsUrl', 'syncSecret'])
+  const functionsUrl = (stored.functionsUrl || DEFAULT_FUNCTIONS_URL).replace(/\/$/, '')
+  const syncSecret = stored.syncSecret || ''
+
+  if (!syncSecret) {
+    throw new Error('Sync Secret em falta. Copia de /setup no dashboard.')
+  }
 
   const data = await extractFromTab(tabId)
 
@@ -29,18 +35,18 @@ async function handleSync(explicitTabId) {
   const results = []
 
   if (data.artigos?.length) {
-    const res = await fetch(`${apiUrl}/api/sync/artigos`, {
+    const res = await fetch(`${functionsUrl}/sync-artigos`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ artigos: data.artigos }),
     })
     const json = await res.json()
-    if (!res.ok) throw new Error(json.error || 'Erro ao sync artigos. O dashboard está a correr?')
+    if (!res.ok) throw new Error(json.error || 'Erro ao sync artigos. Edge Functions deployadas?')
     results.push(`${json.synced} artigos`)
   }
 
   if (data.conversas?.length) {
-    const res = await fetch(`${apiUrl}/api/sync/conversas`, {
+    const res = await fetch(`${functionsUrl}/sync-conversas`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ conversas: data.conversas }),

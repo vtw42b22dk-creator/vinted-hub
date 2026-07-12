@@ -1,6 +1,5 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -64,10 +63,10 @@ export function InventarioFilters({ filtroAtivo }: { filtroAtivo: string }) {
 interface CustoEditorProps {
   artigoId: string
   initialCusto: number
+  onSaved?: () => void
 }
 
-export function CustoEditor({ artigoId, initialCusto }: CustoEditorProps) {
-  const router = useRouter()
+export function CustoEditor({ artigoId, initialCusto, onSaved }: CustoEditorProps) {
   const [value, setValue] = useState(String(initialCusto))
   const [saving, setSaving] = useState(false)
 
@@ -79,7 +78,7 @@ export function CustoEditor({ artigoId, initialCusto }: CustoEditorProps) {
     const supabase = createClient()
     await supabase.from('artigos_vinted').update({ preco_custo }).eq('id', artigoId)
     setSaving(false)
-    router.refresh()
+    onSaved?.()
   }
 
   return (
@@ -99,6 +98,7 @@ export function CustoEditor({ artigoId, initialCusto }: CustoEditorProps) {
 
 interface InventarioTableProps {
   artigos: ArtigoVinted[]
+  onRefresh?: () => void
 }
 
 function ArtigoThumbnail({ fotoUrl, nome }: { fotoUrl: string | null; nome: string }) {
@@ -122,7 +122,7 @@ function ArtigoThumbnail({ fotoUrl, nome }: { fotoUrl: string | null; nome: stri
   )
 }
 
-export function InventarioTable({ artigos }: InventarioTableProps) {
+export function InventarioTable({ artigos, onRefresh }: InventarioTableProps) {
   if (artigos.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
@@ -161,7 +161,7 @@ export function InventarioTable({ artigos }: InventarioTableProps) {
                   </td>
                   <td className="px-4 py-3 text-sm font-medium text-slate-900">{formatEuro(Number(artigo.preco_venda))}</td>
                   <td className="px-4 py-3">
-                    <CustoEditor artigoId={artigo.id} initialCusto={Number(artigo.preco_custo)} />
+                    <CustoEditor artigoId={artigo.id} initialCusto={Number(artigo.preco_custo)} onSaved={onRefresh} />
                   </td>
                   <td className="px-4 py-3 text-sm font-semibold text-emerald-700">{formatEuro(lucro)}</td>
                   <td className="px-4 py-3">
@@ -193,7 +193,7 @@ export function InventarioTable({ artigos }: InventarioTableProps) {
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Custo</p>
-                      <CustoEditor artigoId={artigo.id} initialCusto={Number(artigo.preco_custo)} />
+                      <CustoEditor artigoId={artigo.id} initialCusto={Number(artigo.preco_custo)} onSaved={onRefresh} />
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Lucro</p>

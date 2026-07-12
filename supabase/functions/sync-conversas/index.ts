@@ -1,37 +1,52 @@
-import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import {
   arquivarConversasDeArtigosFechados,
   classificarConversa,
   classificarNegocio,
   type ConversaSyncInput,
-} from '@/lib/conversa-sync'
-import { verifySyncSecret } from '@/lib/sync-auth'
+} from '../_shared/conversa-sync.ts'
+import { corsHeaders, getAdminClient, resolveUserId } from '../_shared/auth.ts'
 
-export async function POST(request: Request) {
-  if (!verifySyncSecret(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
+  const userId = await resolveUserId(req)
+  if (!userId) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
   }
 
   try {
-    const body = await request.json()
+    const body = await req.json()
     const conversas = Array.isArray(body) ? body : body.conversas
 
     if (!Array.isArray(conversas) || conversas.length === 0) {
-      return NextResponse.json({ error: 'Payload inválido' }, { status: 400 })
+      return new Response(JSON.stringify({ error: 'Payload inválido' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
-    const supabase = await createClient()
+    const supabase = getAdminClient()
 
     const ids = conversas.map((c: ConversaSyncInput) => String(c.id_vinted))
     const { data: existingRows } = await supabase
       .from('conversas')
       .select('id_vinted, status_inbox, aberta_em, ultima_mensagem_de')
+      .eq('user_id', userId)
       .in('id_vinted', ids)
 
-    const existingMap = new Map(
-      (existingRows ?? []).map((r) => [r.id_vinted, r])
-    )
+    const existingMap = new Map((existingRows ?? []).map((r) => [r.id_vinted, r]))
 
     const artigoIds = conversas
       .map((c: ConversaSyncInput) => c.id_artigo_vinted)
@@ -42,6 +57,7 @@ export async function POST(request: Request) {
       const { data: artigos } = await supabase
         .from('artigos_vinted')
         .select('id_artigo, status_artigo')
+        .eq('user_id', userId)
         .in('id_artigo', artigoIds)
 
       for (const a of artigos ?? []) {
@@ -59,6 +75,7 @@ export async function POST(request: Request) {
       const ultimo_texto = c.ultimo_texto ? String(c.ultimo_texto) : null
 
       return {
+        user_id: userId,
         id_vinted: String(c.id_vinted),
         user_comprador: String(c.user_comprador ?? 'desconhecido'),
         avatar_comprador: c.avatar_comprador ? String(c.avatar_comprador) : null,
@@ -75,12 +92,15 @@ export async function POST(request: Request) {
     })
 
     const { error } = await supabase.from('conversas').upsert(rows, {
-      onConflict: 'id_vinted',
+      onConflict: 'user_id,id_vinted',
       ignoreDuplicates: false,
     })
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
     const fechados = [...artigoStatusMap.entries()]
@@ -89,8 +109,13 @@ export async function POST(request: Request) {
 
     await arquivarConversasDeArtigosFechados(supabase, fechados)
 
-    return NextResponse.json({ ok: true, synced: rows.length })
+    return new Response(JSON.stringify({ ok: true, synced: rows.length }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
   } catch {
-    return NextResponse.json({ error: 'Erro ao processar pedido' }, { status: 500 })
+    return new Response(JSON.stringify({ error: 'Erro ao processar pedido' }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
   }
-}
+})

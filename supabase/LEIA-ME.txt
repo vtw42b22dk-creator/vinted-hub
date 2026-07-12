@@ -1,0 +1,37 @@
+# Se o Supabase dá erro de rede
+
+Erro: `upstream connect error or disconnect/reset before headers`
+
+**Isto NÃO é culpa do SQL.** A ligação ao Supabase caiu (base de dados a dormir, rede, ou editor sobrecarregado).
+
+## Fix (2 minutos)
+
+1. Abre: https://supabase.com/dashboard/project/varmqpsxxmwtuxwltppn/settings/general
+2. Clica **Restart project** (ou Resume se estiver pausado)
+3. Espera **2 minutos**
+4. Abre SQL Editor: https://supabase.com/dashboard/project/varmqpsxxmwtuxwltppn/sql/new
+5. Corre **UMA linha de cada vez** (pasta `micro/` — ficheiros 01.sql, 02.sql, …)
+
+## Ordem dos micro-SQL
+
+| Ficheiro | O que faz |
+|----------|-----------|
+| 01.sql | Remove FK antiga |
+| 02.sql | Remove unique antigo |
+| 03.sql | Remove unique conversas |
+| 04.sql | Coluna aberta_em |
+| 05.sql | Coluna item_fechado |
+| 06.sql | Tabela profiles |
+| 07.sql | Colunas user_id |
+| 08.sql | Unique novo artigos |
+| 09.sql | Unique novo conversas |
+| 10.sql | RLS + políticas |
+
+Duplo clique em `REINICIAR-E-TENTAR.bat` abre tudo automaticamente.
+
+## Ainda não funciona?
+
+- Tenta **outro browser** (Chrome / Edge)
+- Desliga **VPN** se tiveres
+- Tenta noutra **rede** (ex: dados móveis no telemóvel)
+- Supabase status: https://status.supabase.com

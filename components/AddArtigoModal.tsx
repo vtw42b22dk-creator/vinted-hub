@@ -1,6 +1,5 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { FormEvent, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { EstadoArtigo, StatusArtigo } from '@/lib/types'
@@ -17,10 +16,10 @@ const STATUSES: StatusArtigo[] = [
 interface AddArtigoModalProps {
   open: boolean
   onClose: () => void
+  onSaved?: () => void
 }
 
-export default function AddArtigoModal({ open, onClose }: AddArtigoModalProps) {
-  const router = useRouter()
+export default function AddArtigoModal({ open, onClose, onSaved }: AddArtigoModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -75,7 +74,7 @@ export default function AddArtigoModal({ open, onClose }: AddArtigoModalProps) {
 
       form.reset()
       onClose()
-      router.refresh()
+      onSaved?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao guardar o artigo.')
     } finally {

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { width: 320px; font-family: system-ui, sans-serif; padding: 16px; background: #f8fafc; }
+    body { width: 340px; font-family: system-ui, sans-serif; padding: 16px; background: #f8fafc; }
     h1 { font-size: 16px; color: #0f172a; margin-bottom: 4px; }
     p { font-size: 12px; color: #64748b; margin-bottom: 12px; }
     label { display: block; font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 4px; }
@@ -16,20 +16,21 @@
     #status { font-size: 12px; padding: 8px; border-radius: 8px; display: none; }
     #status.ok { display: block; background: #ecfdf5; color: #065f46; }
     #status.err { display: block; background: #fef2f2; color: #991b1b; }
+    .hint { font-size: 10px; color: #94a3b8; margin-top: -6px; margin-bottom: 10px; }
   </style>
 </head>
 <body>
   <h1>Vinted Hub Sync</h1>
-  <p>Sincroniza a página atual com o dashboard.</p>
+  <p>Sincroniza a Vinted com o teu dashboard online.</p>
 
-  <label for="apiUrl">URL do Dashboard</label>
-  <input id="apiUrl" type="text" value="http://localhost:3000" />
+  <label for="functionsUrl">URL Supabase Functions</label>
+  <input id="functionsUrl" type="text" />
+  <p class="hint">Copia de /setup no dashboard</p>
 
   <label for="syncSecret">Sync Secret</label>
-  <input id="syncSecret" type="password" placeholder="revenda-sync-2026-secreto" />
+  <input id="syncSecret" type="password" placeholder="O teu sync secret pessoal" />
 
   <button id="syncBtn">Sincronizar dados reais da Vinted</button>
-  <button id="clearBtn" style="background:#64748b;margin-top:0">Apagar dados demo</button>
   <div id="status"></div>
 
   <script src="popup.js"></script>

@@ -1,0 +1,2 @@
+-- MICRO 4
+ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS aberta_em TIMESTAMPTZ;

@@ -1,19 +1,20 @@
-const apiUrlInput = document.getElementById('apiUrl')
+const functionsUrlInput = document.getElementById('functionsUrl')
 const syncSecretInput = document.getElementById('syncSecret')
 const syncBtn = document.getElementById('syncBtn')
-const clearBtn = document.getElementById('clearBtn')
 const statusEl = document.getElementById('status')
 
-chrome.storage.local.get(['apiUrl', 'syncSecret'], (stored) => {
-  apiUrlInput.value = stored.apiUrl || 'http://localhost:3000'
-  syncSecretInput.value = stored.syncSecret || 'revenda-sync-2026-secreto'
+const DEFAULT_FUNCTIONS_URL = 'https://varmqpsxxmwtuxwltppn.supabase.co/functions/v1'
+
+chrome.storage.local.get(['functionsUrl', 'syncSecret'], (stored) => {
+  functionsUrlInput.value = stored.functionsUrl || DEFAULT_FUNCTIONS_URL
+  syncSecretInput.value = stored.syncSecret || ''
 })
 
 async function saveConfig() {
-  const apiUrl = apiUrlInput.value.replace(/\/$/, '')
-  const syncSecret = syncSecretInput.value
-  await chrome.storage.local.set({ apiUrl, syncSecret })
-  return { apiUrl, syncSecret }
+  const functionsUrl = functionsUrlInput.value.replace(/\/$/, '')
+  const syncSecret = syncSecretInput.value.trim()
+  await chrome.storage.local.set({ functionsUrl, syncSecret })
+  return { functionsUrl, syncSecret }
 }
 
 function showStatus(text, type) {
@@ -23,7 +24,12 @@ function showStatus(text, type) {
 }
 
 syncBtn.addEventListener('click', async () => {
-  await saveConfig()
+  const { syncSecret } = await saveConfig()
+  if (!syncSecret) {
+    showStatus('✗ Sync Secret em falta — copia de /setup no dashboard', 'err')
+    return
+  }
+
   syncBtn.disabled = true
   showStatus('A sincronizar…', 'ok')
 
@@ -36,33 +42,17 @@ syncBtn.addEventListener('click', async () => {
     })
 
     if (!result) {
-      throw new Error('Extensão não respondeu. Vai a chrome://extensions e clica Recarregar na extensão.')
+      throw new Error('Extensão não respondeu. Vai a chrome://extensions e clica Recarregar.')
     }
     if (!result.ok) throw new Error(result.error || 'Sync falhou')
 
     showStatus(`✓ ${result.message}`, 'ok')
   } catch (err) {
     const msg = err.message?.includes('Receiving end')
-      ? 'Extensão desatualizada. Vai a chrome://extensions → Recarregar → recarrega vinted.pt (F5) → tenta outra vez.'
+      ? 'Extensão desatualizada. Recarrega em chrome://extensions → F5 na Vinted → tenta outra vez.'
       : err.message
     showStatus(`✗ ${msg}`, 'err')
   } finally {
     syncBtn.disabled = false
-  }
-})
-
-clearBtn.addEventListener('click', async () => {
-  const { apiUrl } = await saveConfig()
-  clearBtn.disabled = true
-
-  try {
-    const res = await fetch(`${apiUrl}/api/dev/clear-demo`, { method: 'POST' })
-    const json = await res.json()
-    if (!res.ok) throw new Error(json.error || 'Dashboard offline? Corre npm run dev')
-    showStatus('✓ Dados demo apagados', 'ok')
-  } catch (err) {
-    showStatus(`✗ ${err.message}`, 'err')
-  } finally {
-    clearBtn.disabled = false
   }
 })

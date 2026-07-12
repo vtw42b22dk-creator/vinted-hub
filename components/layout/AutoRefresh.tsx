@@ -1,25 +1,25 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 
 interface AutoRefreshProps {
   intervalMs?: number
+  onRefresh?: () => void
 }
 
-export default function AutoRefresh({ intervalMs = 30000 }: AutoRefreshProps) {
-  const router = useRouter()
-
+export default function AutoRefresh({ intervalMs = 30000, onRefresh }: AutoRefreshProps) {
   useEffect(() => {
+    if (!onRefresh) return
+
     function tick() {
       if (document.visibilityState === 'visible') {
-        router.refresh()
+        onRefresh?.()
       }
     }
 
     const id = setInterval(tick, intervalMs)
     return () => clearInterval(id)
-  }, [router, intervalMs])
+  }, [onRefresh, intervalMs])
 
   return null
 }

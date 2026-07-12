@@ -10,9 +10,10 @@ interface DashboardClientProps {
   artigos: Artigo[]
   metrics: DashboardMetrics
   error?: string | null
+  onRefresh?: () => void
 }
 
-export default function DashboardClient({ artigos, metrics, error }: DashboardClientProps) {
+export default function DashboardClient({ artigos, metrics, error, onRefresh }: DashboardClientProps) {
   const [modalOpen, setModalOpen] = useState(false)
 
   return (
@@ -40,7 +41,7 @@ export default function DashboardClient({ artigos, metrics, error }: DashboardCl
         <ArtigosList artigos={artigos} />
       </section>
 
-      <AddArtigoModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      <AddArtigoModal open={modalOpen} onClose={() => setModalOpen(false)} onSaved={onRefresh} />
     </>
   )
 }

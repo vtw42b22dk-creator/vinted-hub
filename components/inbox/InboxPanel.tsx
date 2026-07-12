@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 import type { Conversa, InboxCounts, StatusInbox } from '@/lib/types'
 import { formatEuro, formatRelativeTime, INBOX_FILTERS, inboxFilterClasses } from '@/lib/utils'
@@ -44,21 +45,40 @@ export default function InboxFilters({ counts }: InboxFiltersProps) {
   )
 }
 
-export function InboxAutoCleanup() {
-  const router = useRouter()
+export function InboxAutoCleanup({ onDone }: { onDone?: () => void }) {
   const [msg, setMsg] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/conversas/arquivar-auto', { method: 'POST' })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.ok && d.totalArquivadas > 0) {
-          setMsg(`${d.totalArquivadas} conversas arquivadas (artigos vendidos/eliminados)`)
-          router.refresh()
-        }
-      })
-      .catch(() => {})
-  }, [router])
+    async function arquivar() {
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+
+      const { data: fechados } = await supabase
+        .from('artigos_vinted')
+        .select('id_artigo')
+        .in('status_artigo', ['vendido', 'oculto'])
+
+      const ids = (fechados ?? []).map((a) => a.id_artigo)
+      if (ids.length > 0) {
+        await supabase
+          .from('conversas')
+          .update({ status_inbox: 'arquivada', item_fechado: true })
+          .in('id_artigo_vinted', ids)
+      }
+
+      const { count } = await supabase
+        .from('conversas')
+        .select('*', { count: 'exact', head: true })
+        .eq('status_inbox', 'arquivada')
+
+      if ((count ?? 0) > 0) {
+        setMsg(`${count} conversas arquivadas (artigos vendidos/eliminados)`)
+        onDone?.()
+      }
+    }
+
+    arquivar().catch(() => {})
+  }, [onDone])
 
   if (!msg) return null
 
@@ -71,15 +91,29 @@ export function InboxAutoCleanup() {
 
 interface ConversaCardProps {
   conversa: Conversa
+  onRefresh?: () => void
 }
 
-export function ConversaCard({ conversa }: ConversaCardProps) {
-  const router = useRouter()
+export function ConversaCard({ conversa, onRefresh }: ConversaCardProps) {
   const needsReply = conversa.ultima_mensagem_de === 'comprador' && conversa.status_inbox === 'por_responder'
 
   async function handleOpen() {
-    await fetch(`/api/conversas/${conversa.id_vinted}/abrir`, { method: 'POST' })
-    router.refresh()
+    const supabase = createClient()
+    let novoStatus = conversa.status_inbox
+
+    if (conversa.status_inbox === 'por_responder' || conversa.status_inbox === 'proposta_recebida') {
+      novoStatus = 'em_negociacao'
+    }
+
+    await supabase
+      .from('conversas')
+      .update({
+        aberta_em: new Date().toISOString(),
+        status_inbox: novoStatus,
+      })
+      .eq('id_vinted', conversa.id_vinted)
+
+    onRefresh?.()
     if (conversa.url_conversa) {
       window.open(conversa.url_conversa, '_blank', 'noopener,noreferrer')
     }
@@ -137,9 +171,10 @@ export function ConversaCard({ conversa }: ConversaCardProps) {
 
 interface InboxListProps {
   conversas: Conversa[]
+  onRefresh?: () => void
 }
 
-export function InboxList({ conversas }: InboxListProps) {
+export function InboxList({ conversas, onRefresh }: InboxListProps) {
   if (conversas.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
@@ -152,7 +187,7 @@ export function InboxList({ conversas }: InboxListProps) {
   return (
     <div className="grid gap-3">
       {conversas.map((conversa) => (
-        <ConversaCard key={conversa.id} conversa={conversa} />
+        <ConversaCard key={conversa.id} conversa={conversa} onRefresh={onRefresh} />
       ))}
     </div>
   )

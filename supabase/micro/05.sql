@@ -1,0 +1,2 @@
+-- MICRO 5
+ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS item_fechado BOOLEAN NOT NULL DEFAULT false;

@@ -1,128 +1,89 @@
-# Deploy — Vinted Hub como site online
+# Vinted Hub — Deploy (GitHub Pages + Supabase)
 
-Publicar o dashboard na internet com **GitHub + Vercel** (grátis).
+Site online igual ao Sinapse App: **GitHub Pages** + **Supabase Auth** + **Edge Functions** para a extensão.
 
----
+## URL do site
 
-## Visão geral
-
-```
-GitHub (código)  →  Vercel (site online)  →  Supabase (dados)
-       ↑
-Extensão Chrome envia sync para o URL do Vercel
-```
-
-URL final exemplo: `https://vinted-hub.vercel.app`
+https://vtw42b22dk-creator.github.io/vinted-hub/
 
 ---
 
-## Passo 1 — Instalar Git
+## 1. Supabase — SQL (uma vez)
 
-Se ainda não tens Git:
+No [SQL Editor](https://supabase.com/dashboard/project/varmqpsxxmwtuxwltppn/sql/new):
 
-1. Descarrega: https://git-scm.com/download/win
-2. Instala (Next → Next, deixa tudo por defeito)
-3. **Fecha e reabre** o terminal / Cursor
+1. `supabase/setup-completo.sql` — tabelas base
+2. `supabase/auth-rls.sql` — login + RLS + sync secret por utilizador
+3. `supabase/migration-conversas-estado.sql` — se ainda não correram as colunas `aberta_em` / `item_fechado`
 
----
-
-## Passo 2 — Criar repositório no GitHub
-
-1. Vai a https://github.com/new
-2. Nome: `vinted-hub` (ou `revenda-dashboard`)
-3. **Private** (recomendado — é o teu negócio)
-4. **Não** marques README (já tens código local)
-5. Clica **Create repository**
-
----
-
-## Passo 3 — Enviar código para o GitHub
-
-No PowerShell:
+## 2. Supabase — Edge Functions (sync extensão)
 
 ```powershell
 cd C:\Users\marti\Projects\revenda-dashboard
-
-git init
-git add .
-git commit -m "Initial commit: Vinted Hub dashboard"
-git branch -M main
-git remote add origin https://github.com/TEU_USER/vinted-hub.git
-git push -u origin main
+npx supabase login
+npx supabase link --project-ref varmqpsxxmwtuxwltppn
+npx supabase functions deploy sync-artigos --no-verify-jwt
+npx supabase functions deploy sync-conversas --no-verify-jwt
 ```
 
-Substitui `TEU_USER` pelo teu username GitHub.
+> `--no-verify-jwt` porque a extensão usa `x-sync-secret` em vez de JWT.
 
-> GitHub pode pedir login — usa **Personal Access Token** como password.
+## 3. GitHub — Secrets + Pages
 
----
+Repositório: https://github.com/vtw42b22dk-creator/vinted-hub
 
-## Passo 4 — Deploy na Vercel (site online)
+**Settings → Secrets and variables → Actions** — adiciona:
 
-1. Vai a https://vercel.com e regista-te com **GitHub**
-2. **Add New Project**
-3. Importa o repositório `vinted-hub`
-4. Em **Environment Variables**, adiciona:
-
-| Name | Value |
-|------|-------|
+| Secret | Valor |
+|--------|-------|
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://varmqpsxxmwtuxwltppn.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | (a tua publishable key) |
-| `SYNC_SECRET` | `revenda-sync-2026-secreto` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | chave anon do Supabase |
+| `NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL` | `https://varmqpsxxmwtuxwltppn.supabase.co/functions/v1` |
 
-5. Clica **Deploy**
-6. Espera ~2 min — recebes um URL tipo `https://vinted-hub.vercel.app`
+**Settings → Pages → Build and deployment:**
 
----
+- Source: **GitHub Actions**
 
-## Passo 5 — Atualizar extensão Chrome
+Cada push para `main` publica automaticamente (workflow `.github/workflows/pages.yml`).
 
-No popup da extensão, muda:
+## 4. Extensão Chrome
 
-- **URL do Dashboard:** `https://vinted-hub.vercel.app` (o teu URL Vercel)
-- **Sync Secret:** `revenda-sync-2026-secreto`
+1. `chrome://extensions` → Modo programador → Carregar pasta `extension/`
+2. Cria conta no site → `/setup` → copia **Sync Secret**
+3. Popup da extensão:
+   - **URL Functions:** `https://varmqpsxxmwtuxwltppn.supabase.co/functions/v1`
+   - **Sync Secret:** o teu secret pessoal
 
-Recarrega a extensão em `chrome://extensions`.
-
----
-
-## Passo 6 — Supabase (permitir o site)
-
-No Supabase → **Authentication** → **URL Configuration**:
-
-- **Site URL:** `https://vinted-hub.vercel.app`
-
-(Só necessário se activares login mais tarde.)
-
----
-
-## Atualizações futuras
-
-Depois de alterar código:
+## 5. Desenvolvimento local
 
 ```powershell
-git add .
-git commit -m "Descrição da alteração"
-git push
+cd C:\Users\marti\Projects\revenda-dashboard
+npm install
+npm run dev
 ```
 
-A Vercel **atualiza o site automaticamente** em ~1 minuto.
+Abre http://localhost:3000 — sem GitHub Pages basePath.
+
+Para testar build de produção:
+
+```powershell
+$env:GITHUB_PAGES='true'; npm run build
+npx serve out
+```
 
 ---
 
-## Alternativa sem terminal: GitHub Desktop
+## Arquitetura
 
-1. Instala https://desktop.github.com
-2. **File → Add local repository** → pasta `revenda-dashboard`
-3. **Publish repository** → Private
-4. Depois segue Passo 4 (Vercel)
-
----
-
-## Local vs Online
-
-| | Local (`localhost`) | Online (Vercel) |
-|---|---|---|
-| Acesso | Só no teu PC | PC, iPad, telemóvel |
-| Precisa terminal | Sim | Não |
-| Sync extensão | `http://localhost:3000` | `https://teu-site.vercel.app` |
+```
+Extensão Chrome (Vinted.pt)
+        │ x-sync-secret
+        ▼
+Supabase Edge Functions (sync-artigos, sync-conversas)
+        │
+        ▼
+Supabase DB (RLS por user_id)
+        ▲
+        │ login email/password
+GitHub Pages (dashboard estático)
+```
