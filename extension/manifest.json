@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Vinted Hub Sync",
+  "version": "0.3.0",
+  "description": "Sincroniza artigos e mensagens da Vinted para o teu dashboard privado",
+  "permissions": ["activeTab", "storage", "scripting", "tabs"],
+  "host_permissions": [
+    "https://www.vinted.pt/*",
+    "https://vinted.pt/*",
+    "https://www.vinted.com/*",
+    "https://vinted.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Vinted Hub Sync"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.vinted.pt/*",
+        "https://vinted.pt/*",
+        "https://www.vinted.com/*",
+        "https://vinted.com/*"
+      ],
+      "js": ["vinted-api.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

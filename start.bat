@@ -1,0 +1,9 @@
+@echo off
+cd /d "%~dp0"
+echo A parar servidores antigos...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /F /PID %%a >nul 2>&1
+echo A limpar cache...
+if exist .next rmdir /s /q .next
+echo A arrancar dashboard...
+start http://localhost:3000
+npm run dev
