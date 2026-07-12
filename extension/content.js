@@ -77,7 +77,7 @@ function init() {
   injectSyncButton()
   watchNavigation()
   scheduleAutoSync(3000)
-  setInterval(() => scheduleAutoSync(1000), 15000)
+  setInterval(() => scheduleAutoSync(1000), 10000)
 }
 
 if (document.readyState === 'loading') {

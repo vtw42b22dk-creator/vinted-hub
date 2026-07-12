@@ -1,58 +1,59 @@
-const functionsUrlInput = document.getElementById('functionsUrl')
-const syncSecretInput = document.getElementById('syncSecret')
 const syncBtn = document.getElementById('syncBtn')
 const statusEl = document.getElementById('status')
+const setupLink = document.getElementById('setupLink')
 
-const DEFAULT_FUNCTIONS_URL = 'https://varmqpsxxmwtuxwltppn.supabase.co/functions/v1'
-
-chrome.storage.local.get(['functionsUrl', 'syncSecret'], (stored) => {
-  functionsUrlInput.value = stored.functionsUrl || DEFAULT_FUNCTIONS_URL
-  syncSecretInput.value = stored.syncSecret || ''
-})
-
-async function saveConfig() {
-  const functionsUrl = functionsUrlInput.value.replace(/\/$/, '')
-  const syncSecret = syncSecretInput.value.trim()
-  await chrome.storage.local.set({ functionsUrl, syncSecret })
-  return { functionsUrl, syncSecret }
-}
-
-function showStatus(text, type) {
-  statusEl.textContent = text
+function showStatus(text, type, dotClass) {
   statusEl.className = type
-  statusEl.style.display = 'block'
+  statusEl.innerHTML = `<span class="dot ${dotClass}"></span>${text}`
 }
 
-syncBtn.addEventListener('click', async () => {
-  const { syncSecret } = await saveConfig()
-  if (!syncSecret) {
-    showStatus('✗ Sync Secret em falta — copia de /setup no dashboard', 'err')
+async function refreshStatus() {
+  const status = await chrome.runtime.sendMessage({ action: 'getSyncStatus' })
+  if (!status) {
+    showStatus('Extensão não respondeu — recarrega em chrome://extensions', 'err', 'err')
     return
   }
 
+  if (!status.syncSecret) {
+    showStatus('Não ligada. Abre /setup no dashboard (login necessário).', 'err', 'err')
+    return
+  }
+
+  if (status.lastSyncOk === false && status.lastSyncError) {
+    showStatus(`Erro: ${status.lastSyncError}`, 'err', 'err')
+    return
+  }
+
+  if (status.lastSyncAt) {
+    const when = new Date(status.lastSyncAt).toLocaleTimeString('pt-PT')
+    showStatus(`✓ ${status.lastSyncMessage || 'Sync OK'} (${when})`, 'ok', 'ok')
+    return
+  }
+
+  showStatus('Ligada. Abre vinted.pt para sync automático.', 'wait', 'wait')
+}
+
+syncBtn.addEventListener('click', async () => {
   syncBtn.disabled = true
-  showStatus('A sincronizar…', 'ok')
+  showStatus('A sincronizar…', 'wait', 'wait')
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-
     const result = await chrome.runtime.sendMessage({
       action: 'syncFromPage',
       tabId: tab?.url?.includes('vinted.') ? tab.id : undefined,
+      manual: true,
     })
 
-    if (!result) {
-      throw new Error('Extensão não respondeu. Vai a chrome://extensions e clica Recarregar.')
-    }
-    if (!result.ok) throw new Error(result.error || 'Sync falhou')
-
-    showStatus(`✓ ${result.message}`, 'ok')
+    if (!result?.ok) throw new Error(result?.error || 'Sync falhou')
+    showStatus(`✓ ${result.message}`, 'ok', 'ok')
   } catch (err) {
-    const msg = err.message?.includes('Receiving end')
-      ? 'Extensão desatualizada. Recarrega em chrome://extensions → F5 na Vinted → tenta outra vez.'
-      : err.message
-    showStatus(`✗ ${msg}`, 'err')
+    showStatus(`✗ ${err.message}`, 'err', 'err')
   } finally {
     syncBtn.disabled = false
+    setTimeout(refreshStatus, 500)
   }
 })
+
+refreshStatus()
+setInterval(refreshStatus, 3000)

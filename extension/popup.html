@@ -4,34 +4,31 @@
   <meta charset="UTF-8" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { width: 340px; font-family: system-ui, sans-serif; padding: 16px; background: #f8fafc; }
+    body { width: 320px; font-family: system-ui, sans-serif; padding: 16px; background: #f8fafc; }
     h1 { font-size: 16px; color: #0f172a; margin-bottom: 4px; }
-    p { font-size: 12px; color: #64748b; margin-bottom: 12px; }
-    label { display: block; font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 4px; }
-    input { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 12px; margin-bottom: 10px; }
+    p { font-size: 12px; color: #64748b; margin-bottom: 10px; }
     button { width: 100%; padding: 10px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
     #syncBtn { background: #0f172a; color: white; }
-    #syncBtn:hover { background: #1e293b; }
-    #syncBtn:disabled { opacity: 0.5; cursor: not-allowed; }
-    #status { font-size: 12px; padding: 8px; border-radius: 8px; display: none; }
-    #status.ok { display: block; background: #ecfdf5; color: #065f46; }
-    #status.err { display: block; background: #fef2f2; color: #991b1b; }
-    .hint { font-size: 10px; color: #94a3b8; margin-top: -6px; margin-bottom: 10px; }
+    #syncBtn:disabled { opacity: 0.5; }
+    #status { font-size: 12px; padding: 10px; border-radius: 8px; margin-bottom: 8px; background: #fff; border: 1px solid #e2e8f0; }
+    #status.ok { border-color: #a7f3d0; background: #ecfdf5; color: #065f46; }
+    #status.err { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+    #status.wait { color: #64748b; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .dot.ok { background: #10b981; }
+    .dot.err { background: #ef4444; }
+    .dot.wait { background: #94a3b8; }
+    a { color: #0284c7; font-size: 12px; }
   </style>
 </head>
 <body>
   <h1>Vinted Hub Sync</h1>
-  <p>Sincroniza a Vinted com o teu dashboard online.</p>
+  <p>Sync automático a cada 10s com Vinted aberta.</p>
 
-  <label for="functionsUrl">URL Supabase Functions</label>
-  <input id="functionsUrl" type="text" />
-  <p class="hint">Copia de /setup no dashboard</p>
+  <div id="status" class="wait"><span class="dot wait"></span>A verificar…</div>
 
-  <label for="syncSecret">Sync Secret</label>
-  <input id="syncSecret" type="password" placeholder="O teu sync secret pessoal" />
-
-  <button id="syncBtn">Sincronizar dados reais da Vinted</button>
-  <div id="status"></div>
+  <button id="syncBtn">Sincronizar agora</button>
+  <p><a id="setupLink" href="https://vtw42b22dk-creator.github.io/vinted-hub/setup/" target="_blank">Abrir /setup no dashboard</a></p>
 
   <script src="popup.js"></script>
 </body>

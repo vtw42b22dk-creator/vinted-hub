@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import AppShell from '@/components/layout/AppShell'
-import { getFunctionsUrl, getSiteUrl } from '@/lib/config'
+import { getSiteUrl } from '@/lib/config'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/AuthContext'
 
@@ -44,7 +44,13 @@ export default function SetupClient() {
         conversas: conversas.error ? conversas.error.message : (conversas.count ?? 0),
       },
     })
-    if (profile.data?.sync_secret) setSyncSecret(profile.data.sync_secret)
+    if (profile.data?.sync_secret) {
+      setSyncSecret(profile.data.sync_secret)
+      window.postMessage(
+        { type: 'VINTED_HUB_CONFIG', syncSecret: profile.data.sync_secret },
+        '*'
+      )
+    }
   }, [auth.user])
 
   useEffect(() => {
@@ -68,7 +74,6 @@ export default function SetupClient() {
     setClearing(false)
   }
 
-  const functionsUrl = getFunctionsUrl()
   const siteUrl = getSiteUrl()
 
   return (
@@ -104,35 +109,29 @@ export default function SetupClient() {
             </a>
           </Step>
 
-          <Step number={2} title="Deploy Edge Functions (sync extensão)" done={Boolean(functionsUrl)}>
+          <Step number={2} title="SQL sync automático (1x)" done={Boolean(syncSecret)}>
             <p className="text-sm text-slate-600">
-              A extensão Chrome envia dados para Supabase Edge Functions (não localhost).
+              Corre <code className="rounded bg-slate-100 px-1">supabase/sync-rpc.sql</code> no Supabase.
             </p>
-            <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
-              {`npx supabase login
-npx supabase link --project-ref varmqpsxxmwtuxwltppn
-npx supabase functions deploy sync-artigos
-npx supabase functions deploy sync-conversas`}
-            </pre>
+            <a
+              href="https://supabase.com/dashboard/project/varmqpsxxmwtuxwltppn/sql/new"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-block text-sm font-medium text-sky-600 hover:text-sky-800"
+            >
+              Abrir SQL Editor ↗
+            </a>
           </Step>
 
-          <Step number={3} title="Instalar extensão Chrome">
+          <Step number={3} title="Extensão Chrome (automático)" done={Boolean(syncSecret)}>
             <ol className="list-inside list-decimal space-y-1 text-sm text-slate-600">
-              <li>
-                Chrome → <code className="rounded bg-slate-100 px-1">chrome://extensions</code>
-              </li>
-              <li>Modo programador → Carregar pasta <code className="rounded bg-slate-100 px-1">extension/</code></li>
-              <li>
-                URL Functions:{' '}
-                <code className="rounded bg-slate-100 px-1 break-all">{functionsUrl || '…'}</code>
-              </li>
-              <li>
-                Sync Secret:{' '}
-                <code className="rounded bg-slate-100 px-1 break-all">
-                  {syncSecret || 'Executa auth-rls.sql e recarrega'}
-                </code>
-              </li>
+              <li>Chrome → <code className="rounded bg-slate-100 px-1">chrome://extensions</code> → Recarregar</li>
+              <li>Abre <strong>/setup</strong> nesta página — liga a extensão sozinha</li>
+              <li>Abre <strong>vinted.pt</strong> — sync a cada 10s automaticamente</li>
             </ol>
+            {syncSecret && (
+              <p className="mt-2 text-xs text-emerald-700">✓ Sync secret enviado para a extensão</p>
+            )}
             <button
               type="button"
               onClick={clearDemo}
