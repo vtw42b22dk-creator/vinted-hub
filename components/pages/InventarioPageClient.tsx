@@ -32,7 +32,7 @@ function InventarioContent() {
     const { data, error: fetchError } = await supabase
       .from('artigos_vinted_com_lucro')
       .select('*')
-      .order('sincronizado_em', { ascending: false })
+      .order('atualizado_em', { ascending: false })
 
     setTodos((data ?? []) as ArtigoVinted[])
     setError(
@@ -49,6 +49,11 @@ function InventarioContent() {
 
   const artigos = filtrarArtigosInventario(todos, filtro)
   const metrics = calcularMetricasVinted(todos)
+  const filterCounts = {
+    a_venda: filtrarArtigosInventario(todos, 'a_venda').length,
+    vendidos: filtrarArtigosInventario(todos, 'vendidos').length,
+    todos: todos.length,
+  }
 
   if (loading) {
     return (
@@ -76,7 +81,7 @@ function InventarioContent() {
         )}
 
         <InventarioMetricsCards metrics={metrics} />
-        <InventarioFilters filtroAtivo={filtro} />
+        <InventarioFilters filtroAtivo={filtro} counts={filterCounts} />
         <InventarioTable artigos={artigos} onRefresh={load} />
       </div>
     </>

@@ -30,8 +30,33 @@ export const INBOX_FILTERS: { key: StatusInbox; label: string }[] = [
   { key: 'por_responder', label: 'Por Responder' },
   { key: 'proposta_recebida', label: 'Propostas Recebidas' },
   { key: 'proposta_enviada', label: 'Propostas Enviadas' },
-  { key: 'em_negociacao', label: 'Em Negociação' },
 ]
+
+export function ordenarConversas(conversas: { fixada_em?: string | null; data_atualizacao: string }[]) {
+  return [...conversas].sort((a, b) => {
+    const fa = a.fixada_em ? new Date(a.fixada_em).getTime() : 0
+    const fb = b.fixada_em ? new Date(b.fixada_em).getTime() : 0
+    if (fa !== fb) return fb - fa
+    return new Date(b.data_atualizacao).getTime() - new Date(a.data_atualizacao).getTime()
+  })
+}
+
+export function statusVintedLabel(status: StatusArtigoVinted): string {
+  switch (status) {
+    case 'ativo':
+      return 'À venda'
+    case 'reservado':
+      return 'Reservado'
+    case 'vendido':
+      return 'Vendido'
+    case 'rascunho':
+      return 'Rascunho'
+    case 'oculto':
+      return 'Oculto'
+    default:
+      return status
+  }
+}
 
 export function statusBadgeClasses(status: StatusArtigo): string {
   const base = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium'
@@ -136,9 +161,17 @@ export function filtrarArtigosInventario(
   artigos: ArtigoVinted[],
   filtro: 'a_venda' | 'vendidos' | 'todos'
 ) {
-  if (filtro === 'vendidos') return artigos.filter((a) => a.status_artigo === 'vendido')
-  if (filtro === 'a_venda') {
-    return artigos.filter((a) => a.status_artigo === 'ativo' || a.status_artigo === 'reservado')
+  if (filtro === 'vendidos') {
+    return artigos
+      .filter((a) => a.status_artigo === 'vendido')
+      .sort((a, b) => new Date(b.atualizado_em).getTime() - new Date(a.atualizado_em).getTime())
   }
-  return artigos
+  if (filtro === 'a_venda') {
+    return artigos
+      .filter((a) => a.status_artigo === 'ativo' || a.status_artigo === 'reservado')
+      .sort((a, b) => new Date(b.atualizado_em).getTime() - new Date(a.atualizado_em).getTime())
+  }
+  return [...artigos].sort(
+    (a, b) => new Date(b.atualizado_em).getTime() - new Date(a.atualizado_em).getTime()
+  )
 }

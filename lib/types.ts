@@ -11,8 +11,9 @@ export type StatusInbox =
   | 'por_responder'
   | 'proposta_recebida'
   | 'proposta_enviada'
-  | 'em_negociacao'
   | 'arquivada'
+
+export type IniciadaPor = 'comprador' | 'vendedor'
 
 export type StatusNegocio =
   | 'sem_proposta'
@@ -72,6 +73,8 @@ export interface Conversa {
   criado_em: string
   aberta_em?: string | null
   suprimida?: boolean
+  iniciada_por?: IniciadaPor | null
+  fixada_em?: string | null
   mensagens_json?: MensagemConversa[]
 }
 
@@ -111,7 +114,6 @@ export interface InboxCounts {
   por_responder: number
   proposta_recebida: number
   proposta_enviada: number
-  em_negociacao: number
 }
 
 export interface OverviewMetrics {

@@ -3,8 +3,18 @@
 
 ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS suprimida BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS mensagens_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS iniciada_por TEXT;
+ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS fixada_em TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_conversas_suprimida ON public.conversas (user_id, suprimida);
+CREATE INDEX IF NOT EXISTS idx_conversas_fixada ON public.conversas (user_id, fixada_em DESC NULLS LAST);
+
+UPDATE public.conversas
+SET status_inbox = CASE
+  WHEN COALESCE(iniciada_por, 'comprador') = 'vendedor' THEN 'proposta_enviada'::status_inbox
+  ELSE 'proposta_recebida'::status_inbox
+END
+WHERE status_inbox = 'em_negociacao';
 
 CREATE OR REPLACE FUNCTION public.sync_from_vinted(
   p_sync_secret text,
@@ -84,18 +94,24 @@ BEGIN
       ELSE 'por_responder'::status_inbox
     END;
 
-    IF v_existing.aberta_em IS NOT NULL AND v_status = 'por_responder' THEN
-      v_status := 'em_negociacao';
+    IF v_status = 'em_negociacao' THEN
+      v_status := CASE COALESCE(c->>'iniciada_por', 'comprador')
+        WHEN 'vendedor' THEN 'proposta_enviada'::status_inbox
+        ELSE 'proposta_recebida'::status_inbox
+      END;
     END IF;
 
-    IF v_existing.aberta_em IS NOT NULL AND v_status = 'proposta_recebida' AND NOT v_unread THEN
-      v_status := 'em_negociacao';
+    IF v_existing.aberta_em IS NOT NULL AND v_status = 'por_responder' AND NOT v_unread THEN
+      v_status := CASE COALESCE(c->>'iniciada_por', 'comprador')
+        WHEN 'vendedor' THEN 'proposta_enviada'::status_inbox
+        ELSE 'proposta_recebida'::status_inbox
+      END;
     END IF;
 
     INSERT INTO public.conversas (
       user_id, id_vinted, user_comprador, avatar_comprador, ultimo_texto,
       ultima_mensagem_de, status_inbox, status_negocio, valor_proposta,
-      id_artigo_vinted, url_conversa, item_fechado, suprimida, mensagens_json, data_atualizacao
+      id_artigo_vinted, url_conversa, item_fechado, suprimida, iniciada_por, mensagens_json, data_atualizacao
     ) VALUES (
       v_user_id,
       c->>'id_vinted',
@@ -114,6 +130,7 @@ BEGIN
       NULLIF(c->>'url_conversa', ''),
       COALESCE((c->>'item_fechado')::boolean, false),
       false,
+      NULLIF(c->>'iniciada_por', ''),
       COALESCE(c->'mensagens', '[]'::jsonb),
       now()
     )
@@ -128,6 +145,7 @@ BEGIN
       id_artigo_vinted = EXCLUDED.id_artigo_vinted,
       url_conversa = EXCLUDED.url_conversa,
       item_fechado = EXCLUDED.item_fechado,
+      iniciada_por = COALESCE(EXCLUDED.iniciada_por, conversas.iniciada_por),
       mensagens_json = CASE
         WHEN jsonb_array_length(EXCLUDED.mensagens_json) > 0 THEN EXCLUDED.mensagens_json
         ELSE conversas.mensagens_json

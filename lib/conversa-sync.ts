@@ -1,4 +1,9 @@
 import type { StatusInbox, StatusNegocio } from '@/lib/types'
+import {
+  classificarConversaFromMensagens,
+  type IniciadaPor,
+} from '@/lib/inbox-classify'
+import type { MensagemConversa } from '@/lib/types'
 
 export interface ConversaSyncInput {
   id_vinted: string
@@ -13,16 +18,15 @@ export interface ConversaSyncInput {
   url_conversa?: string | null
   item_fechado?: boolean
   vinted_unread?: boolean
+  iniciada_por?: IniciadaPor | null
+  mensagens?: MensagemConversa[]
 }
 
 export interface ConversaExisting {
   status_inbox: StatusInbox
   aberta_em: string | null
   ultima_mensagem_de: string
-}
-
-export interface ArtigoStatusMap {
-  [id_artigo: string]: string
+  iniciada_por?: IniciadaPor | null
 }
 
 export function classificarConversa(
@@ -34,43 +38,20 @@ export function classificarConversa(
     return 'arquivada'
   }
 
-  const texto = (input.ultimo_texto || '').toLowerCase()
-  const unread = Boolean(input.vinted_unread)
-  const msgComprador = input.ultima_mensagem_de === 'comprador'
+  const mensagens = input.mensagens ?? []
+  const result = classificarConversaFromMensagens({
+    mensagens,
+    vinted_unread: input.vinted_unread,
+    item_fechado: false,
+    aberta_em: existing?.aberta_em,
+    iniciada_por: input.iniciada_por ?? existing?.iniciada_por ?? null,
+  })
 
-  const propostaRecebida =
-    /fez uma proposta|proposta de|nova proposta|offer|oferta de|proposta recebida/i.test(texto)
-  const propostaEnviada =
-    /enviaste uma proposta|enviaste uma oferta|oferta enviada|proposta enviada/i.test(texto)
-  const emNegociacaoAtiva =
-    /aceit|recus|negoci|contra|counter|combin|enviar|envio|embal/i.test(texto)
-
-  if (propostaRecebida && unread && msgComprador) return 'proposta_recebida'
-  if (propostaEnviada || (!msgComprador && /proposta|oferta/i.test(texto))) return 'proposta_enviada'
-
-  if (existing?.status_inbox === 'proposta_recebida' && !unread) {
-    return 'em_negociacao'
+  if (existing?.aberta_em && result.status_inbox === 'por_responder' && !input.vinted_unread) {
+    return result.iniciada_por === 'vendedor' ? 'proposta_enviada' : 'proposta_recebida'
   }
 
-  if (propostaRecebida && !unread) return 'em_negociacao'
-  if (emNegociacaoAtiva) return 'em_negociacao'
-
-  if (existing?.aberta_em && existing.status_inbox === 'por_responder') {
-    if (unread && msgComprador) return 'por_responder'
-    return 'em_negociacao'
-  }
-
-  if (unread && msgComprador) return 'por_responder'
-
-  if (existing?.status_inbox === 'por_responder' && existing.aberta_em) {
-    return 'em_negociacao'
-  }
-
-  if (existing?.status_inbox && existing.status_inbox !== 'arquivada') {
-    return existing.status_inbox
-  }
-
-  return unread ? 'por_responder' : 'em_negociacao'
+  return result.status_inbox
 }
 
 export function classificarNegocio(texto: string, statusInbox: StatusInbox): StatusNegocio {
@@ -82,17 +63,4 @@ export function classificarNegocio(texto: string, statusInbox: StatusInbox): Sta
     return 'proposta_pendente'
   }
   return 'sem_proposta'
-}
-
-export async function arquivarConversasDeArtigosFechados(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  artigosFechados: string[]
-) {
-  if (artigosFechados.length === 0) return
-
-  await supabase
-    .from('conversas')
-    .update({ status_inbox: 'arquivada', item_fechado: true })
-    .in('id_artigo_vinted', artigosFechados)
 }

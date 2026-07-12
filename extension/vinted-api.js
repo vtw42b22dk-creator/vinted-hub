@@ -98,41 +98,13 @@ async function fetchAllUserItems(userId) {
 
 function mapConversation(c, currentUserId) {
   const desc = c.description || c.subtitle || ''
-  const texto = desc.toLowerCase()
   const unread = Boolean(c.unread)
   const domain = window.location.origin
-
   const transaction = c.transaction || {}
   const itemClosed =
     transaction.status === 'completed' ||
     transaction.status === 'cancelled' ||
-    /vendido|sold|eliminado|deleted|conclu/i.test(texto)
-
-  const propostaRecebida =
-    /fez uma proposta|proposta de|nova proposta|offer|oferta de/i.test(texto) ||
-    (transaction.offer?.status === 'pending' && transaction.offer?.sender_id !== currentUserId)
-
-  const propostaEnviada =
-    /enviaste uma proposta|enviaste uma oferta|oferta enviada|proposta enviada/i.test(texto) ||
-    (transaction.offer?.status === 'pending' && transaction.offer?.sender_id === currentUserId)
-
-  let status_inbox = 'por_responder'
-
-  if (itemClosed) {
-    status_inbox = 'arquivada'
-  } else if (propostaRecebida && unread) {
-    status_inbox = 'proposta_recebida'
-  } else if (propostaEnviada) {
-    status_inbox = 'proposta_enviada'
-  } else if (propostaRecebida && !unread) {
-    status_inbox = 'em_negociacao'
-  } else if (unread) {
-    status_inbox = 'por_responder'
-  } else if (/aceit|recus|negoci|enviar|envio/i.test(texto)) {
-    status_inbox = 'em_negociacao'
-  } else {
-    status_inbox = 'em_negociacao'
-  }
+    /vendido|sold|eliminado|deleted|conclu/i.test(desc.toLowerCase())
 
   const offerMatch = desc.match(/(\d+[,.]\d{2}|\d+)\s*€/)
   const valor_proposta =
@@ -141,8 +113,6 @@ function mapConversation(c, currentUserId) {
       : offerMatch
         ? parseFloat(offerMatch[1].replace(',', '.'))
         : null
-
-  const msgComprador = unread || /fez uma proposta|aceita|interess/i.test(texto)
 
   return {
     id_vinted: String(c.id),
@@ -153,14 +123,59 @@ function mapConversation(c, currentUserId) {
       c.item_photos?.[0]?.url ||
       null,
     ultimo_texto: desc,
-    ultima_mensagem_de: msgComprador ? 'comprador' : 'vendedor',
-    status_inbox,
-    status_negocio: propostaRecebida || propostaEnviada ? 'proposta_pendente' : 'sem_proposta',
+    ultima_mensagem_de: unread ? 'comprador' : 'vendedor',
+    status_inbox: itemClosed ? 'arquivada' : unread ? 'por_responder' : 'proposta_recebida',
+    status_negocio: /proposta|oferta|offer/i.test(desc) ? 'proposta_pendente' : 'sem_proposta',
     valor_proposta,
     id_artigo_vinted: c.item_id ? String(c.item_id) : transaction.item_id ? String(transaction.item_id) : null,
     url_conversa: `${domain}/inbox/${c.id}`,
     item_fechado: itemClosed,
     vinted_unread: unread,
+    iniciada_por: null,
+    mensagens: [],
+  }
+}
+
+function isMensagemReal(m) {
+  return m.tipo !== 'sistema' && m.de !== 'sistema'
+}
+
+function classifyFromMessages(mensagens, unread, itemClosed) {
+  if (itemClosed) {
+    return { status_inbox: 'arquivada', iniciada_por: null, ultima_mensagem_de: 'comprador' }
+  }
+
+  const real = mensagens.filter(isMensagemReal)
+  const first = real[0] || null
+  const last = real.length ? real[real.length - 1] : null
+  const iniciada_por = first ? (first.de === 'vendedor' ? 'vendedor' : 'comprador') : null
+  const ultima_mensagem_de = last ? (last.de === 'vendedor' ? 'vendedor' : 'comprador') : 'comprador'
+
+  if (unread && ultima_mensagem_de === 'comprador') {
+    return { status_inbox: 'por_responder', iniciada_por, ultima_mensagem_de }
+  }
+
+  if (iniciada_por === 'vendedor') {
+    return { status_inbox: 'proposta_enviada', iniciada_por, ultima_mensagem_de }
+  }
+
+  return {
+    status_inbox: 'proposta_recebida',
+    iniciada_por: iniciada_por || 'comprador',
+    ultima_mensagem_de,
+  }
+}
+
+function finalizeConversation(c) {
+  const all = c.mensagens || []
+  const classified = classifyFromMessages(all, c.vinted_unread, c.item_fechado)
+  const lastReal = all.filter(isMensagemReal).slice(-1)[0]
+
+  return {
+    ...c,
+    ...classified,
+    mensagens: all.slice(-5),
+    ultimo_texto: lastReal?.texto || c.ultimo_texto,
   }
 }
 
@@ -240,7 +255,7 @@ function isSystemMessage(texto, entityType) {
   return SYSTEM_PATTERNS.some((re) => re.test(t))
 }
 
-function mapMessages(rawMessages, currentUserId, limit = 5) {
+function mapMessagesAll(rawMessages, currentUserId) {
   const out = []
 
   for (const m of rawMessages) {
@@ -263,13 +278,19 @@ function mapMessages(rawMessages, currentUserId, limit = 5) {
     })
   }
 
-  return out.slice(-limit)
+  out.sort((a, b) => {
+    const ta = a.data ? new Date(a.data).getTime() : 0
+    const tb = b.data ? new Date(b.data).getTime() : 0
+    return ta - tb
+  })
+
+  return out
 }
 
-async function fetchConversationMessages(conversationId, currentUserId, limit = 5) {
+async function fetchConversationMessages(conversationId, currentUserId) {
   const endpoints = [
-    `/api/v2/conversations/${conversationId}/messages?per_page=30`,
-    `/api/v2/inbox/${conversationId}/messages?per_page=30`,
+    `/api/v2/conversations/${conversationId}/messages?per_page=50`,
+    `/api/v2/inbox/${conversationId}/messages?per_page=50`,
     `/api/v2/conversations/${conversationId}?mark_as_read=false`,
   ]
 
@@ -283,7 +304,7 @@ async function fetchConversationMessages(conversationId, currentUserId, limit = 
         []
 
       if (raw.length > 0) {
-        return mapMessages(raw, currentUserId, limit)
+        return mapMessagesAll(raw, currentUserId)
       }
     } catch {
       // tentar próximo endpoint
@@ -294,16 +315,16 @@ async function fetchConversationMessages(conversationId, currentUserId, limit = 
 }
 
 async function enrichConversasWithMessages(conversas, userId) {
-  const max = Math.min(conversas.length, 35)
-
-  for (let i = 0; i < max; i++) {
+  for (let i = 0; i < conversas.length; i++) {
     try {
-      conversas[i].mensagens = await fetchConversationMessages(conversas[i].id_vinted, userId, 5)
-      if (i > 0 && i % 5 === 0) {
-        await new Promise((r) => setTimeout(r, 200))
+      conversas[i].mensagens = await fetchConversationMessages(conversas[i].id_vinted, userId)
+      conversas[i] = finalizeConversation(conversas[i])
+      if (i > 0 && i % 4 === 0) {
+        await new Promise((r) => setTimeout(r, 250))
       }
     } catch {
       conversas[i].mensagens = []
+      conversas[i] = finalizeConversation(conversas[i])
     }
   }
 

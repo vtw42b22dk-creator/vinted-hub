@@ -4,17 +4,13 @@ import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import AutoRefresh from '@/components/layout/AutoRefresh'
-import InboxFilters, { InboxAutoCleanup, InboxList, LiveIndicator } from '@/components/inbox/InboxPanel'
+import InboxFilters, { InboxList, LiveIndicator } from '@/components/inbox/InboxPanel'
 import { createClient } from '@/lib/supabase/client'
 import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
 import type { Conversa, InboxCounts, StatusInbox } from '@/lib/types'
+import { ordenarConversas } from '@/lib/utils'
 
-const VALID_FILTERS: StatusInbox[] = [
-  'por_responder',
-  'proposta_recebida',
-  'proposta_enviada',
-  'em_negociacao',
-]
+const VALID_FILTERS: StatusInbox[] = ['por_responder', 'proposta_recebida', 'proposta_enviada']
 
 async function getInboxCounts(supabase: ReturnType<typeof createClient>): Promise<InboxCounts> {
   const { data } = await supabase
@@ -22,16 +18,18 @@ async function getInboxCounts(supabase: ReturnType<typeof createClient>): Promis
     .select('status_inbox')
     .neq('status_inbox', 'arquivada')
     .eq('suprimida', false)
+
   const counts: InboxCounts = {
     por_responder: 0,
     proposta_recebida: 0,
     proposta_enviada: 0,
-    em_negociacao: 0,
   }
+
   for (const row of data ?? []) {
     const key = row.status_inbox as keyof InboxCounts
     if (key in counts) counts[key]++
   }
+
   return counts
 }
 
@@ -47,7 +45,6 @@ function InboxContent() {
     por_responder: 0,
     proposta_recebida: 0,
     proposta_enviada: 0,
-    em_negociacao: 0,
   })
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,7 +61,7 @@ function InboxContent() {
       getInboxCounts(supabase),
     ])
 
-    setConversas((conversasResult.data ?? []) as Conversa[])
+    setConversas(ordenarConversas((conversasResult.data ?? []) as Conversa[]) as Conversa[])
     setCounts(newCounts)
     setError(
       conversasResult.error
@@ -108,8 +105,6 @@ function InboxContent() {
             {error}
           </div>
         )}
-
-        <InboxAutoCleanup onDone={load} />
 
         <InboxFilters counts={counts} />
 

@@ -15,7 +15,6 @@ async function getInboxCounts(supabase: ReturnType<typeof createClient>): Promis
     por_responder: 0,
     proposta_recebida: 0,
     proposta_enviada: 0,
-    em_negociacao: 0,
   }
   for (const row of data ?? []) {
     const key = row.status_inbox as keyof InboxCounts
@@ -30,7 +29,6 @@ export default function HomePageClient() {
     por_responder: 0,
     proposta_recebida: 0,
     proposta_enviada: 0,
-    em_negociacao: 0,
   })
   const [vintedMetrics, setVintedMetrics] = useState(calcularMetricasVinted([]))
   const [error, setError] = useState<string | null>(null)
@@ -66,8 +64,7 @@ export default function HomePageClient() {
   const totalInbox =
     inboxCounts.por_responder +
     inboxCounts.proposta_recebida +
-    inboxCounts.proposta_enviada +
-    inboxCounts.em_negociacao
+    inboxCounts.proposta_enviada
 
   if (loading) {
     return (

@@ -3,8 +3,9 @@
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import ConversaThreadModal from '@/components/inbox/ConversaThreadModal'
+import { statusAposVista } from '@/lib/inbox-classify'
 import type { Conversa, InboxCounts, StatusInbox } from '@/lib/types'
 import { formatEuro, formatRelativeTime, INBOX_FILTERS, inboxFilterClasses } from '@/lib/utils'
 
@@ -60,51 +61,6 @@ export function LiveIndicator({ status }: { status: 'connecting' | 'live' | 'pol
   )
 }
 
-export function InboxAutoCleanup({ onDone }: { onDone?: () => void }) {
-  const [msg, setMsg] = useState<string | null>(null)
-
-  useEffect(() => {
-    async function arquivar() {
-      const supabase = createClient()
-
-      const { data: fechados } = await supabase
-        .from('artigos_vinted')
-        .select('id_artigo')
-        .in('status_artigo', ['vendido', 'oculto'])
-
-      const ids = (fechados ?? []).map((a) => a.id_artigo)
-      if (ids.length > 0) {
-        await supabase
-          .from('conversas')
-          .update({ status_inbox: 'arquivada', item_fechado: true })
-          .in('id_artigo_vinted', ids)
-          .eq('suprimida', false)
-      }
-
-      const { count } = await supabase
-        .from('conversas')
-        .select('*', { count: 'exact', head: true })
-        .eq('status_inbox', 'arquivada')
-        .eq('suprimida', false)
-
-      if ((count ?? 0) > 0) {
-        setMsg(`${count} conversas arquivadas (artigos vendidos/eliminados)`)
-        onDone?.()
-      }
-    }
-
-    arquivar().catch(() => {})
-  }, [onDone])
-
-  if (!msg) return null
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
-      {msg}
-    </div>
-  )
-}
-
 interface InboxToolbarProps {
   filtro: StatusInbox
   selectMode: boolean
@@ -131,69 +87,57 @@ export function InboxToolbar({
   busy,
 }: InboxToolbarProps) {
   const isPorResponder = filtro === 'por_responder'
-  const bulkSelectedLabel = isPorResponder
-    ? `Marcar como vistas (${selectedCount})`
-    : `Arquivar selecionadas (${selectedCount})`
-  const bulkAllLabel = isPorResponder ? 'Marcar todas como vistas' : 'Arquivar todas neste filtro'
+  const bulkAllLabel = isPorResponder ? 'Marcar todas como vistas' : 'Arquivar todas'
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
       <button
         type="button"
         onClick={onToggleSelect}
-        className={`rounded-lg px-3 py-2 text-sm font-medium ${
-          selectMode
-            ? 'bg-slate-900 text-white'
-            : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-        }`}
+        disabled={busy}
+        className="hover:text-slate-800 disabled:opacity-50"
       >
-        {selectMode ? 'Cancelar seleção' : 'Selecionar'}
+        {selectMode ? 'Cancelar' : 'Selecionar'}
       </button>
 
       {selectMode && (
         <>
-          <button
-            type="button"
-            onClick={onSelectAll}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-          >
-            Selecionar todas ({totalCount})
+          <span className="text-slate-300">·</span>
+          <button type="button" onClick={onSelectAll} className="hover:text-slate-800">
+            Todas ({totalCount})
           </button>
           {selectedCount > 0 && (
-            <button
-              type="button"
-              onClick={onClearSelection}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-            >
-              Limpar
-            </button>
+            <>
+              <span className="text-slate-300">·</span>
+              <button type="button" onClick={onClearSelection} className="hover:text-slate-800">
+                Limpar
+              </button>
+              <span className="text-slate-300">·</span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onBulkSelected}
+                className="hover:text-slate-800 disabled:opacity-50"
+              >
+                {isPorResponder ? `Marcar ${selectedCount} como vistas` : `Arquivar ${selectedCount}`}
+              </button>
+            </>
           )}
-          <button
-            type="button"
-            disabled={selectedCount === 0 || busy}
-            onClick={onBulkSelected}
-            className={`rounded-lg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 ${
-              isPorResponder ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
-            }`}
-          >
-            {busy ? 'A processar…' : bulkSelectedLabel}
-          </button>
         </>
       )}
 
       {!selectMode && totalCount > 0 && (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onBulkAll}
-          className={`rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50 ${
-            isPorResponder
-              ? 'border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-              : 'border border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-          }`}
-        >
-          {busy ? 'A processar…' : bulkAllLabel}
-        </button>
+        <>
+          <span className="text-slate-300">·</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onBulkAll}
+            className="hover:text-slate-800 disabled:opacity-50"
+          >
+            {bulkAllLabel}
+          </button>
+        </>
       )}
     </div>
   )
@@ -201,27 +145,33 @@ export function InboxToolbar({
 
 interface ConversaCardProps {
   conversa: Conversa
+  filtro: StatusInbox
   selectMode: boolean
   selected: boolean
   onToggleSelect: (id: string) => void
   onViewThread: (conversa: Conversa) => void
   onOpenVinted: (conversa: Conversa) => void
+  onTogglePin: (conversa: Conversa) => void
 }
 
 export function ConversaCard({
   conversa,
+  filtro,
   selectMode,
   selected,
   onToggleSelect,
   onViewThread,
   onOpenVinted,
+  onTogglePin,
 }: ConversaCardProps) {
   const needsReply = conversa.ultima_mensagem_de === 'comprador' && conversa.status_inbox === 'por_responder'
+  const pinned = Boolean(conversa.fixada_em)
+  const canPin = filtro !== 'por_responder'
 
   return (
     <article
       className={`rounded-xl border bg-white p-4 shadow-sm transition-shadow ${
-        selected ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-200'
+        selected ? 'border-sky-400 ring-2 ring-sky-100' : pinned ? 'border-amber-200' : 'border-slate-200'
       }`}
     >
       <div className="flex items-start gap-3">
@@ -249,6 +199,7 @@ export function ConversaCard({
             <div className="min-w-0">
               <p className="truncate font-semibold text-slate-900">
                 {needsReply && <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-red-500" />}
+                {pinned && <span className="mr-1 text-amber-500" title="Fixada">📌</span>}
                 @{conversa.user_comprador}
               </p>
               {conversa.id_artigo_vinted && (
@@ -275,6 +226,16 @@ export function ConversaCard({
             >
               Ver conversa
             </button>
+            {canPin && (
+              <button
+                type="button"
+                onClick={() => onTogglePin(conversa)}
+                className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+                title={pinned ? 'Desafixar' : 'Fixar no topo'}
+              >
+                {pinned ? 'Desafixar' : 'Fixar'}
+              </button>
+            )}
             {conversa.url_conversa && (
               <button
                 type="button"
@@ -297,16 +258,22 @@ interface InboxListProps {
   onRefresh?: () => void
 }
 
-async function markConversasViewed(ids: string[]) {
-  if (ids.length === 0) return
+async function markConversasViewed(items: Conversa[]) {
+  if (items.length === 0) return
   const supabase = createClient()
-  await supabase
-    .from('conversas')
-    .update({
-      aberta_em: new Date().toISOString(),
-      status_inbox: 'em_negociacao',
-    })
-    .in('id', ids)
+  const now = new Date().toISOString()
+
+  await Promise.all(
+    items.map((c) =>
+      supabase
+        .from('conversas')
+        .update({
+          aberta_em: now,
+          status_inbox: statusAposVista(c.iniciada_por),
+        })
+        .eq('id', c.id)
+    )
+  )
 }
 
 async function archiveConversas(ids: string[]) {
@@ -317,6 +284,7 @@ async function archiveConversas(ids: string[]) {
     .update({
       suprimida: true,
       status_inbox: 'arquivada',
+      fixada_em: null,
     })
     .in('id', ids)
 }
@@ -346,23 +314,23 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
     setSelectedIds(new Set())
   }
 
-  async function runBulk(ids: string[], all: boolean) {
-    if (ids.length === 0) return
+  async function runBulk(items: Conversa[], all: boolean) {
+    if (items.length === 0) return
 
     if (isPorResponder) {
       const msg = all
-        ? `Marcar todas as ${ids.length} conversas como vistas?`
-        : `Marcar ${ids.length} conversa(s) como vistas?`
+        ? `Marcar todas as ${items.length} conversas como vistas?`
+        : `Marcar ${items.length} conversa(s) como vistas?`
       if (!confirm(msg)) return
       setBusy(true)
-      await markConversasViewed(ids)
+      await markConversasViewed(items)
     } else {
       const msg = all
-        ? `Arquivar todas as ${ids.length} conversas deste filtro? Não voltam com o sync.`
-        : `Arquivar ${ids.length} conversa(s)? Não voltam com o sync.`
+        ? `Arquivar todas as ${items.length} conversas deste filtro?`
+        : `Arquivar ${items.length} conversa(s)?`
       if (!confirm(msg)) return
       setBusy(true)
-      await archiveConversas(ids)
+      await archiveConversas(items.map((c) => c.id))
     }
 
     setSelectedIds(new Set())
@@ -372,23 +340,19 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
   }
 
   async function handleBulkSelected() {
-    await runBulk([...selectedIds], false)
+    const items = conversas.filter((c) => selectedIds.has(c.id))
+    await runBulk(items, false)
   }
 
   async function handleBulkAll() {
-    await runBulk(
-      conversas.map((c) => c.id),
-      true
-    )
+    await runBulk(conversas, true)
   }
 
   async function markViewed(conversa: Conversa) {
-    if (conversa.status_inbox !== 'por_responder' && conversa.status_inbox !== 'proposta_recebida') {
-      return conversa
-    }
+    if (conversa.status_inbox !== 'por_responder') return conversa
 
     const supabase = createClient()
-    const novoStatus = 'em_negociacao'
+    const novoStatus = statusAposVista(conversa.iniciada_por)
     await supabase
       .from('conversas')
       .update({
@@ -398,7 +362,11 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
       .eq('id', conversa.id)
 
     onRefresh?.()
-    return { ...conversa, status_inbox: novoStatus as StatusInbox, aberta_em: new Date().toISOString() }
+    return {
+      ...conversa,
+      status_inbox: novoStatus,
+      aberta_em: new Date().toISOString(),
+    }
   }
 
   async function handleViewThread(conversa: Conversa) {
@@ -408,11 +376,10 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
 
   async function handleOpenVinted(conversa: Conversa) {
     const supabase = createClient()
-    let novoStatus = conversa.status_inbox
-
-    if (conversa.status_inbox === 'por_responder' || conversa.status_inbox === 'proposta_recebida') {
-      novoStatus = 'em_negociacao'
-    }
+    const novoStatus =
+      conversa.status_inbox === 'por_responder'
+        ? statusAposVista(conversa.iniciada_por)
+        : conversa.status_inbox
 
     await supabase
       .from('conversas')
@@ -427,6 +394,13 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
     if (conversa.url_conversa) {
       window.open(conversa.url_conversa, '_blank', 'noopener,noreferrer')
     }
+  }
+
+  async function handleTogglePin(conversa: Conversa) {
+    const supabase = createClient()
+    const fixada_em = conversa.fixada_em ? null : new Date().toISOString()
+    await supabase.from('conversas').update({ fixada_em }).eq('id', conversa.id)
+    onRefresh?.()
   }
 
   if (conversas.length === 0) {
@@ -456,16 +430,18 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
         busy={busy}
       />
 
-      <div className="mt-3 grid gap-3">
+      <div className="mt-2 grid gap-3">
         {conversas.map((conversa) => (
           <ConversaCard
             key={conversa.id}
             conversa={conversa}
+            filtro={filtro}
             selectMode={selectMode}
             selected={selectedIds.has(conversa.id)}
             onToggleSelect={toggleSelect}
             onViewThread={handleViewThread}
             onOpenVinted={handleOpenVinted}
+            onTogglePin={handleTogglePin}
           />
         ))}
       </div>
