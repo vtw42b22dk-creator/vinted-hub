@@ -70,6 +70,16 @@ export interface Conversa {
   url_conversa: string | null
   data_atualizacao: string
   criado_em: string
+  aberta_em?: string | null
+  suprimida?: boolean
+  mensagens_json?: MensagemConversa[]
+}
+
+export interface MensagemConversa {
+  texto: string
+  de: 'comprador' | 'vendedor' | 'sistema'
+  data?: string | null
+  tipo?: 'mensagem' | 'sistema'
 }
 
 export interface ArtigoVinted {

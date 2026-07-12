@@ -17,7 +17,11 @@ const VALID_FILTERS: StatusInbox[] = [
 ]
 
 async function getInboxCounts(supabase: ReturnType<typeof createClient>): Promise<InboxCounts> {
-  const { data } = await supabase.from('conversas').select('status_inbox').neq('status_inbox', 'arquivada')
+  const { data } = await supabase
+    .from('conversas')
+    .select('status_inbox')
+    .neq('status_inbox', 'arquivada')
+    .eq('suprimida', false)
   const counts: InboxCounts = {
     por_responder: 0,
     proposta_recebida: 0,
@@ -55,6 +59,7 @@ function InboxContent() {
         .from('conversas')
         .select('*')
         .eq('status_inbox', filtro)
+        .eq('suprimida', false)
         .order('data_atualizacao', { ascending: false }),
       getInboxCounts(supabase),
     ])
@@ -108,7 +113,7 @@ function InboxContent() {
 
         <InboxFilters counts={counts} />
 
-        <InboxList conversas={conversas} onRefresh={load} />
+        <InboxList conversas={conversas} filtro={filtro} onRefresh={load} />
       </div>
     </>
   )

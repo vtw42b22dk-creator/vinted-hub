@@ -219,18 +219,115 @@ function parsePrice(value) {
   return match ? parseFloat(match[0]) : 0
 }
 
+const SYSTEM_PATTERNS = [
+  /item (was )?(sold|deleted|removed|eliminado|vendido|apagado)/i,
+  /artigo (foi )?(vendido|eliminado|apagado)/i,
+  /preparar o pedido|a preparar o envio|preparing (the )?order|getting (the )?order ready/i,
+  /pedido (foi )?(enviado|confirmado|conclu[íi]do)/i,
+  /shipment (has been )?(sent|confirmed|label)/i,
+  /transa[çc][ãa]o (conclu[íi]da|finalizada|cancelada)/i,
+  /transaction (completed|cancelled)/i,
+  /proposta (expirou|expired)/i,
+  /offer (expired|cancelled)/i,
+  /left the chat|saiu da conversa/i,
+]
+
+function isSystemMessage(texto, entityType) {
+  const type = String(entityType || '').toLowerCase()
+  if (type.includes('action') || type.includes('status') || type.includes('system')) return true
+  const t = String(texto || '').trim()
+  if (!t) return true
+  return SYSTEM_PATTERNS.some((re) => re.test(t))
+}
+
+function mapMessages(rawMessages, currentUserId, limit = 5) {
+  const out = []
+
+  for (const m of rawMessages) {
+    const entity = m.entity || m
+    const entityType = m.entity_type || entity.type || ''
+    const texto = String(
+      entity.body || entity.title || entity.message || entity.text || entity.content || m.body || ''
+    ).trim()
+
+    if (!texto) continue
+
+    const userId = entity.user_id ?? entity.sender_id ?? m.user_id
+    const isSystem = isSystemMessage(texto, entityType)
+
+    out.push({
+      texto,
+      de: isSystem ? 'sistema' : String(userId) === String(currentUserId) ? 'vendedor' : 'comprador',
+      data: m.created_at || entity.created_at || entity.created_at_ts || null,
+      tipo: isSystem ? 'sistema' : 'mensagem',
+    })
+  }
+
+  return out.slice(-limit)
+}
+
+async function fetchConversationMessages(conversationId, currentUserId, limit = 5) {
+  const endpoints = [
+    `/api/v2/conversations/${conversationId}/messages?per_page=30`,
+    `/api/v2/inbox/${conversationId}/messages?per_page=30`,
+    `/api/v2/conversations/${conversationId}?mark_as_read=false`,
+  ]
+
+  for (const path of endpoints) {
+    try {
+      const data = await vintedFetch(path)
+      const raw =
+        data.messages ||
+        data.conversation?.messages ||
+        data.conversation_thread?.messages ||
+        []
+
+      if (raw.length > 0) {
+        return mapMessages(raw, currentUserId, limit)
+      }
+    } catch {
+      // tentar próximo endpoint
+    }
+  }
+
+  return []
+}
+
+async function enrichConversasWithMessages(conversas, userId) {
+  const max = Math.min(conversas.length, 35)
+
+  for (let i = 0; i < max; i++) {
+    try {
+      conversas[i].mensagens = await fetchConversationMessages(conversas[i].id_vinted, userId, 5)
+      if (i > 0 && i % 5 === 0) {
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    } catch {
+      conversas[i].mensagens = []
+    }
+  }
+
+  return conversas
+}
+
 async function syncAllFromVinted() {
   const user = await fetchCurrentUser()
   if (!user?.id) {
     throw new Error('Não estás logado na Vinted. Faz login em vinted.pt primeiro.')
   }
 
-  const [conversas, artigos] = await Promise.all([
-    fetchAllInbox(user.id),
-    fetchAllUserItems(user.id),
-  ])
+  let conversas = await fetchAllInbox(user.id)
+  conversas = await enrichConversasWithMessages(conversas, user.id)
+
+  const artigos = await fetchAllUserItems(user.id)
 
   return { artigos, conversas, user: user.login || user.username }
 }
 
-window.__vintedHub = { syncAllFromVinted, fetchAllInbox, fetchAllUserItems, fetchCurrentUser }
+window.__vintedHub = {
+  syncAllFromVinted,
+  fetchAllInbox,
+  fetchAllUserItems,
+  fetchCurrentUser,
+  fetchConversationMessages,
+}

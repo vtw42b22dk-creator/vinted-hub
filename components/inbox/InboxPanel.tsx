@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
-import ConversaPreviewModal from '@/components/inbox/ConversaPreviewModal'
+import ConversaThreadModal from '@/components/inbox/ConversaThreadModal'
 import type { Conversa, InboxCounts, StatusInbox } from '@/lib/types'
 import { formatEuro, formatRelativeTime, INBOX_FILTERS, inboxFilterClasses } from '@/lib/utils'
 
@@ -78,12 +78,14 @@ export function InboxAutoCleanup({ onDone }: { onDone?: () => void }) {
           .from('conversas')
           .update({ status_inbox: 'arquivada', item_fechado: true })
           .in('id_artigo_vinted', ids)
+          .eq('suprimida', false)
       }
 
       const { count } = await supabase
         .from('conversas')
         .select('*', { count: 'exact', head: true })
         .eq('status_inbox', 'arquivada')
+        .eq('suprimida', false)
 
       if ((count ?? 0) > 0) {
         setMsg(`${count} conversas arquivadas (artigos vendidos/eliminados)`)
@@ -104,28 +106,36 @@ export function InboxAutoCleanup({ onDone }: { onDone?: () => void }) {
 }
 
 interface InboxToolbarProps {
+  filtro: StatusInbox
   selectMode: boolean
   selectedCount: number
   totalCount: number
   onToggleSelect: () => void
   onSelectAll: () => void
   onClearSelection: () => void
-  onDeleteSelected: () => void
-  onDeleteAll: () => void
-  deleting: boolean
+  onBulkSelected: () => void
+  onBulkAll: () => void
+  busy: boolean
 }
 
 export function InboxToolbar({
+  filtro,
   selectMode,
   selectedCount,
   totalCount,
   onToggleSelect,
   onSelectAll,
   onClearSelection,
-  onDeleteSelected,
-  onDeleteAll,
-  deleting,
+  onBulkSelected,
+  onBulkAll,
+  busy,
 }: InboxToolbarProps) {
+  const isPorResponder = filtro === 'por_responder'
+  const bulkSelectedLabel = isPorResponder
+    ? `Marcar como vistas (${selectedCount})`
+    : `Arquivar selecionadas (${selectedCount})`
+  const bulkAllLabel = isPorResponder ? 'Marcar todas como vistas' : 'Arquivar todas neste filtro'
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <button
@@ -160,11 +170,13 @@ export function InboxToolbar({
           )}
           <button
             type="button"
-            disabled={selectedCount === 0 || deleting}
-            onClick={onDeleteSelected}
-            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            disabled={selectedCount === 0 || busy}
+            onClick={onBulkSelected}
+            className={`rounded-lg px-3 py-2 text-sm font-medium text-white disabled:opacity-50 ${
+              isPorResponder ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
+            }`}
           >
-            {deleting ? 'A apagar…' : `Apagar selecionadas (${selectedCount})`}
+            {busy ? 'A processar…' : bulkSelectedLabel}
           </button>
         </>
       )}
@@ -172,11 +184,15 @@ export function InboxToolbar({
       {!selectMode && totalCount > 0 && (
         <button
           type="button"
-          disabled={deleting}
-          onClick={onDeleteAll}
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+          disabled={busy}
+          onClick={onBulkAll}
+          className={`rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-50 ${
+            isPorResponder
+              ? 'border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+              : 'border border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+          }`}
         >
-          Apagar todas neste filtro
+          {busy ? 'A processar…' : bulkAllLabel}
         </button>
       )}
     </div>
@@ -188,7 +204,7 @@ interface ConversaCardProps {
   selectMode: boolean
   selected: boolean
   onToggleSelect: (id: string) => void
-  onPreview: (conversa: Conversa) => void
+  onViewThread: (conversa: Conversa) => void
   onOpenVinted: (conversa: Conversa) => void
 }
 
@@ -197,7 +213,7 @@ export function ConversaCard({
   selectMode,
   selected,
   onToggleSelect,
-  onPreview,
+  onViewThread,
   onOpenVinted,
 }: ConversaCardProps) {
   const needsReply = conversa.ultima_mensagem_de === 'comprador' && conversa.status_inbox === 'por_responder'
@@ -254,10 +270,10 @@ export function ConversaCard({
             )}
             <button
               type="button"
-              onClick={() => onPreview(conversa)}
+              onClick={() => onViewThread(conversa)}
               className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
             >
-              Ver mensagem
+              Ver conversa
             </button>
             {conversa.url_conversa && (
               <button
@@ -277,14 +293,41 @@ export function ConversaCard({
 
 interface InboxListProps {
   conversas: Conversa[]
+  filtro: StatusInbox
   onRefresh?: () => void
 }
 
-export function InboxList({ conversas, onRefresh }: InboxListProps) {
+async function markConversasViewed(ids: string[]) {
+  if (ids.length === 0) return
+  const supabase = createClient()
+  await supabase
+    .from('conversas')
+    .update({
+      aberta_em: new Date().toISOString(),
+      status_inbox: 'em_negociacao',
+    })
+    .in('id', ids)
+}
+
+async function archiveConversas(ids: string[]) {
+  if (ids.length === 0) return
+  const supabase = createClient()
+  await supabase
+    .from('conversas')
+    .update({
+      suprimida: true,
+      status_inbox: 'arquivada',
+    })
+    .in('id', ids)
+}
+
+export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [preview, setPreview] = useState<Conversa | null>(null)
-  const [deleting, setDeleting] = useState(false)
+  const [thread, setThread] = useState<Conversa | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const isPorResponder = filtro === 'por_responder'
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -303,25 +346,64 @@ export function InboxList({ conversas, onRefresh }: InboxListProps) {
     setSelectedIds(new Set())
   }
 
-  async function deleteByIds(ids: string[]) {
+  async function runBulk(ids: string[], all: boolean) {
     if (ids.length === 0) return
-    setDeleting(true)
-    const supabase = createClient()
-    await supabase.from('conversas').delete().in('id', ids)
+
+    if (isPorResponder) {
+      const msg = all
+        ? `Marcar todas as ${ids.length} conversas como vistas?`
+        : `Marcar ${ids.length} conversa(s) como vistas?`
+      if (!confirm(msg)) return
+      setBusy(true)
+      await markConversasViewed(ids)
+    } else {
+      const msg = all
+        ? `Arquivar todas as ${ids.length} conversas deste filtro? Não voltam com o sync.`
+        : `Arquivar ${ids.length} conversa(s)? Não voltam com o sync.`
+      if (!confirm(msg)) return
+      setBusy(true)
+      await archiveConversas(ids)
+    }
+
     setSelectedIds(new Set())
     setSelectMode(false)
-    setDeleting(false)
+    setBusy(false)
     onRefresh?.()
   }
 
-  async function handleDeleteSelected() {
-    if (!confirm(`Apagar ${selectedIds.size} conversa(s) do dashboard?`)) return
-    await deleteByIds([...selectedIds])
+  async function handleBulkSelected() {
+    await runBulk([...selectedIds], false)
   }
 
-  async function handleDeleteAll() {
-    if (!confirm(`Apagar todas as ${conversas.length} conversas deste filtro?`)) return
-    await deleteByIds(conversas.map((c) => c.id))
+  async function handleBulkAll() {
+    await runBulk(
+      conversas.map((c) => c.id),
+      true
+    )
+  }
+
+  async function markViewed(conversa: Conversa) {
+    if (conversa.status_inbox !== 'por_responder' && conversa.status_inbox !== 'proposta_recebida') {
+      return conversa
+    }
+
+    const supabase = createClient()
+    const novoStatus = 'em_negociacao'
+    await supabase
+      .from('conversas')
+      .update({
+        aberta_em: new Date().toISOString(),
+        status_inbox: novoStatus,
+      })
+      .eq('id', conversa.id)
+
+    onRefresh?.()
+    return { ...conversa, status_inbox: novoStatus as StatusInbox, aberta_em: new Date().toISOString() }
+  }
+
+  async function handleViewThread(conversa: Conversa) {
+    const updated = await markViewed(conversa)
+    setThread(updated)
   }
 
   async function handleOpenVinted(conversa: Conversa) {
@@ -341,7 +423,7 @@ export function InboxList({ conversas, onRefresh }: InboxListProps) {
       .eq('id_vinted', conversa.id_vinted)
 
     onRefresh?.()
-    setPreview(null)
+    setThread(null)
     if (conversa.url_conversa) {
       window.open(conversa.url_conversa, '_blank', 'noopener,noreferrer')
     }
@@ -359,6 +441,7 @@ export function InboxList({ conversas, onRefresh }: InboxListProps) {
   return (
     <>
       <InboxToolbar
+        filtro={filtro}
         selectMode={selectMode}
         selectedCount={selectedIds.size}
         totalCount={conversas.length}
@@ -368,9 +451,9 @@ export function InboxList({ conversas, onRefresh }: InboxListProps) {
         }}
         onSelectAll={selectAll}
         onClearSelection={clearSelection}
-        onDeleteSelected={handleDeleteSelected}
-        onDeleteAll={handleDeleteAll}
-        deleting={deleting}
+        onBulkSelected={handleBulkSelected}
+        onBulkAll={handleBulkAll}
+        busy={busy}
       />
 
       <div className="mt-3 grid gap-3">
@@ -381,15 +464,15 @@ export function InboxList({ conversas, onRefresh }: InboxListProps) {
             selectMode={selectMode}
             selected={selectedIds.has(conversa.id)}
             onToggleSelect={toggleSelect}
-            onPreview={setPreview}
+            onViewThread={handleViewThread}
             onOpenVinted={handleOpenVinted}
           />
         ))}
       </div>
 
-      <ConversaPreviewModal
-        conversa={preview}
-        onClose={() => setPreview(null)}
+      <ConversaThreadModal
+        conversa={thread}
+        onClose={() => setThread(null)}
         onOpenVinted={handleOpenVinted}
       />
     </>

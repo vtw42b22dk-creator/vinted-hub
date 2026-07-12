@@ -1,11 +1,12 @@
--- SYNC AUTOMÁTICO — corre UMA VEZ no Supabase SQL Editor
--- Permite à extensão sincronizar SEM Edge Functions
+-- Conversas: suprimir + histórico de mensagens
+-- Corre UMA VEZ no Supabase SQL Editor
 
 ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS suprimida BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS mensagens_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_conversas_suprimida ON public.conversas (user_id, suprimida);
 
+-- Recria sync respeitando suprimidas + vistas
 CREATE OR REPLACE FUNCTION public.sync_from_vinted(
   p_sync_secret text,
   p_artigos jsonb DEFAULT '[]'::jsonb,
@@ -28,7 +29,7 @@ DECLARE
 BEGIN
   SELECT id INTO v_user_id FROM public.profiles WHERE sync_secret = p_sync_secret;
   IF v_user_id IS NULL THEN
-    RAISE EXCEPTION 'Sync secret inválido — copia de /setup no dashboard';
+    RAISE EXCEPTION 'Sync secret inválido';
   END IF;
 
   FOR a IN SELECT value FROM jsonb_array_elements(COALESCE(p_artigos, '[]'::jsonb))
@@ -37,32 +38,18 @@ BEGIN
       user_id, id_artigo, nome, marca, tamanho, preco_venda, status_artigo,
       foto_url, url_vinted, sincronizado_em, atualizado_em
     ) VALUES (
-      v_user_id,
-      a->>'id_artigo',
-      COALESCE(a->>'nome', 'Sem nome'),
-      NULLIF(a->>'marca', ''),
-      NULLIF(a->>'tamanho', ''),
+      v_user_id, a->>'id_artigo', COALESCE(a->>'nome', 'Sem nome'),
+      NULLIF(a->>'marca', ''), NULLIF(a->>'tamanho', ''),
       COALESCE((a->>'preco_venda')::numeric, 0),
-      CASE
-        WHEN COALESCE(a->>'status_artigo', 'ativo') IN ('ativo','reservado','vendido','rascunho','oculto')
-        THEN COALESCE(a->>'status_artigo', 'ativo')::status_artigo_vinted
-        ELSE 'ativo'::status_artigo_vinted
-      END,
-      NULLIF(a->>'foto_url', ''),
-      NULLIF(a->>'url_vinted', ''),
-      now(),
-      now()
+      CASE WHEN COALESCE(a->>'status_artigo', 'ativo') IN ('ativo','reservado','vendido','rascunho','oculto')
+        THEN COALESCE(a->>'status_artigo', 'ativo')::status_artigo_vinted ELSE 'ativo'::status_artigo_vinted END,
+      NULLIF(a->>'foto_url', ''), NULLIF(a->>'url_vinted', ''), now(), now()
     )
     ON CONFLICT (user_id, id_artigo) DO UPDATE SET
-      nome = EXCLUDED.nome,
-      marca = EXCLUDED.marca,
-      tamanho = EXCLUDED.tamanho,
-      preco_venda = EXCLUDED.preco_venda,
-      status_artigo = EXCLUDED.status_artigo,
-      foto_url = EXCLUDED.foto_url,
-      url_vinted = EXCLUDED.url_vinted,
-      sincronizado_em = now(),
-      atualizado_em = now();
+      nome = EXCLUDED.nome, marca = EXCLUDED.marca, tamanho = EXCLUDED.tamanho,
+      preco_venda = EXCLUDED.preco_venda, status_artigo = EXCLUDED.status_artigo,
+      foto_url = EXCLUDED.foto_url, url_vinted = EXCLUDED.url_vinted,
+      sincronizado_em = now(), atualizado_em = now();
     v_artigos := v_artigos + 1;
   END LOOP;
 
@@ -97,25 +84,16 @@ BEGIN
       ultima_mensagem_de, status_inbox, status_negocio, valor_proposta,
       id_artigo_vinted, url_conversa, item_fechado, suprimida, mensagens_json, data_atualizacao
     ) VALUES (
-      v_user_id,
-      c->>'id_vinted',
-      COALESCE(c->>'user_comprador', 'desconhecido'),
-      NULLIF(c->>'avatar_comprador', ''),
-      NULLIF(c->>'ultimo_texto', ''),
+      v_user_id, c->>'id_vinted', COALESCE(c->>'user_comprador', 'desconhecido'),
+      NULLIF(c->>'avatar_comprador', ''), NULLIF(c->>'ultimo_texto', ''),
       CASE WHEN c->>'ultima_mensagem_de' = 'vendedor' THEN 'vendedor' ELSE 'comprador' END,
       v_status,
-      CASE
-        WHEN COALESCE(c->>'status_negocio', 'sem_proposta') IN ('sem_proposta','proposta_pendente','aceite','recusada','expirada')
-        THEN COALESCE(c->>'status_negocio', 'sem_proposta')::status_negocio
-        ELSE 'sem_proposta'::status_negocio
-      END,
+      CASE WHEN COALESCE(c->>'status_negocio', 'sem_proposta') IN ('sem_proposta','proposta_pendente','aceite','recusada','expirada')
+        THEN COALESCE(c->>'status_negocio', 'sem_proposta')::status_negocio ELSE 'sem_proposta'::status_negocio END,
       NULLIF(c->>'valor_proposta', '')::numeric,
-      NULLIF(c->>'id_artigo_vinted', ''),
-      NULLIF(c->>'url_conversa', ''),
-      COALESCE((c->>'item_fechado')::boolean, false),
-      false,
-      COALESCE(c->'mensagens', '[]'::jsonb),
-      now()
+      NULLIF(c->>'id_artigo_vinted', ''), NULLIF(c->>'url_conversa', ''),
+      COALESCE((c->>'item_fechado')::boolean, false), false,
+      COALESCE(c->'mensagens', '[]'::jsonb), now()
     )
     ON CONFLICT (user_id, id_vinted) DO UPDATE SET
       user_comprador = EXCLUDED.user_comprador,
@@ -138,10 +116,8 @@ BEGIN
     v_conversas := v_conversas + 1;
   END LOOP;
 
-  UPDATE public.conversas
-  SET status_inbox = 'arquivada', item_fechado = true
-  WHERE user_id = v_user_id
-    AND NOT suprimida
+  UPDATE public.conversas SET status_inbox = 'arquivada', item_fechado = true
+  WHERE user_id = v_user_id AND NOT suprimida
     AND id_artigo_vinted IN (
       SELECT id_artigo FROM public.artigos_vinted
       WHERE user_id = v_user_id AND status_artigo IN ('vendido', 'oculto')
