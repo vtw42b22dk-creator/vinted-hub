@@ -8,7 +8,6 @@ const navItems = [
   { href: '/', label: 'Visão Geral' },
   { href: '/inbox', label: 'Mensagens' },
   { href: '/inventario', label: 'Inventário' },
-  { href: '/setup', label: 'Setup' },
 ]
 
 interface SidebarProps {

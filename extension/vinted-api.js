@@ -129,6 +129,10 @@ function mapItemStatus(item, urlHint) {
 function parsePrice(value) {
   if (value == null) return 0
   if (typeof value === 'number') return value
+  // A Vinted devolve muitas vezes { amount: "12.5", currency_code: "EUR" }
+  if (typeof value === 'object') {
+    return parsePrice(value.amount ?? value.value ?? value.price ?? null)
+  }
   const match = String(value).replace(',', '.').match(/[\d.]+/)
   return match ? parseFloat(match[0]) : 0
 }

@@ -24,39 +24,6 @@ export type StatusNegocio =
 
 export type StatusArtigoVinted = 'ativo' | 'reservado' | 'vendido' | 'rascunho' | 'oculto'
 
-export interface Artigo {
-  id: string
-  criado_em: string
-  nome: string
-  marca: string | null
-  tamanho: string | null
-  estado_artigo: EstadoArtigo
-  preco_custo: number
-  preco_venda_previsto: number
-  preco_venda_real: number | null
-  foto_url: string | null
-  status: StatusArtigo
-}
-
-export interface NovoArtigoInput {
-  nome: string
-  marca?: string
-  tamanho?: string
-  estado_artigo: EstadoArtigo
-  preco_custo: number
-  preco_venda_previsto: number
-  preco_venda_real?: number | null
-  foto_url?: string | null
-  status: StatusArtigo
-}
-
-export interface DashboardMetrics {
-  totalEmStock: number
-  investimentoTotal: number
-  lucroPotencial: number
-  lucroRealLiquido: number
-}
-
 export interface Conversa {
   id: string
   id_vinted: string
@@ -83,6 +50,13 @@ export interface Conversa {
   mensagens_json?: MensagemConversa[]
   notas?: string | null
   adicionada_manual?: boolean
+  pasta_id?: string | null
+}
+
+export interface PastaConversas {
+  id: string
+  nome: string
+  criado_em: string
 }
 
 export interface MensagemConversa {
@@ -119,10 +93,4 @@ export interface InventarioMetrics {
 
 export interface InboxCounts {
   total: number
-}
-
-export interface OverviewMetrics {
-  manual: DashboardMetrics
-  vinted: InventarioMetrics
-  inbox: InboxCounts
 }

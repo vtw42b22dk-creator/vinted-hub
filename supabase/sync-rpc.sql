@@ -8,6 +8,65 @@ ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS adicionada_manual BOOLEAN 
 
 CREATE INDEX IF NOT EXISTS idx_conversas_manual ON public.conversas (user_id, adicionada_manual, suprimida);
 
+-- Pastas de conversas (criadas pelo utilizador no dashboard)
+CREATE TABLE IF NOT EXISTS public.pastas_conversas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  nome TEXT NOT NULL,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.pastas_conversas ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "pastas_select" ON public.pastas_conversas;
+DROP POLICY IF EXISTS "pastas_insert" ON public.pastas_conversas;
+DROP POLICY IF EXISTS "pastas_update" ON public.pastas_conversas;
+DROP POLICY IF EXISTS "pastas_delete" ON public.pastas_conversas;
+CREATE POLICY "pastas_select" ON public.pastas_conversas FOR SELECT USING (user_id = auth.uid());
+CREATE POLICY "pastas_insert" ON public.pastas_conversas FOR INSERT WITH CHECK (user_id = auth.uid());
+CREATE POLICY "pastas_update" ON public.pastas_conversas FOR UPDATE USING (user_id = auth.uid());
+CREATE POLICY "pastas_delete" ON public.pastas_conversas FOR DELETE USING (user_id = auth.uid());
+
+ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS pasta_id UUID REFERENCES public.pastas_conversas(id) ON DELETE SET NULL;
+
+-- Limpar dados demo antigos (causavam artigos repetidos)
+DELETE FROM public.conversas WHERE id_vinted IN ('conv-001','conv-002','conv-003','conv-004','conv-005');
+DELETE FROM public.artigos_vinted WHERE id_artigo IN ('100001','100002','100003','100004','100005');
+DELETE FROM public.artigos WHERE nome = 'Blusa vintage manual';
+
+-- Realtime para a tabela de pastas (ignora se já estiver adicionada)
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.pastas_conversas;
+EXCEPTION WHEN duplicate_object OR undefined_object THEN
+  NULL;
+END $$;
+
+-- Lista de pastas para a extensão (autenticada por sync secret)
+CREATE OR REPLACE FUNCTION public.get_pastas_ext(p_sync_secret text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user_id uuid;
+  v_pastas jsonb;
+BEGIN
+  SELECT id INTO v_user_id FROM public.profiles WHERE sync_secret = p_sync_secret;
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Sync secret inválido';
+  END IF;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('id', id, 'nome', nome) ORDER BY nome), '[]'::jsonb)
+  INTO v_pastas
+  FROM public.pastas_conversas
+  WHERE user_id = v_user_id;
+
+  RETURN v_pastas;
+END;
+$$;
+
 -- Sync automático: SÓ artigos (inventário). Conversas são adicionadas manualmente.
 CREATE OR REPLACE FUNCTION public.sync_from_vinted(
   p_sync_secret text,
@@ -68,21 +127,33 @@ AS $$
 DECLARE
   v_user_id uuid;
   c jsonb := p_conversa;
+  v_pasta uuid;
 BEGIN
   SELECT id INTO v_user_id FROM public.profiles WHERE sync_secret = p_sync_secret;
   IF v_user_id IS NULL THEN
-    RAISE EXCEPTION 'Sync secret inválido — copia de /setup no dashboard';
+    RAISE EXCEPTION 'Sync secret inválido — abre o dashboard para ligar a extensão';
   END IF;
 
   IF c IS NULL OR c->>'id_vinted' IS NULL THEN
     RAISE EXCEPTION 'Conversa inválida';
   END IF;
 
+  -- Pasta escolhida no botão da Vinted (tem de pertencer ao utilizador)
+  BEGIN
+    v_pasta := NULLIF(c->>'pasta_id', '')::uuid;
+  EXCEPTION WHEN others THEN
+    v_pasta := NULL;
+  END;
+  IF v_pasta IS NOT NULL THEN
+    SELECT id INTO v_pasta FROM public.pastas_conversas
+    WHERE id = v_pasta AND user_id = v_user_id;
+  END IF;
+
   INSERT INTO public.conversas (
     user_id, id_vinted, user_comprador, avatar_comprador, ultimo_texto,
     ultima_mensagem_de, status_inbox, status_negocio, valor_proposta,
     id_artigo_vinted, url_conversa, item_fechado,
-    suprimida, adicionada_manual, mensagens_json, data_atualizacao
+    suprimida, adicionada_manual, pasta_id, mensagens_json, data_atualizacao
   ) VALUES (
     v_user_id, c->>'id_vinted', COALESCE(c->>'user_comprador', 'desconhecido'),
     NULLIF(c->>'avatar_comprador', ''), NULLIF(c->>'ultimo_texto', ''),
@@ -93,7 +164,7 @@ BEGIN
     NULLIF(c->>'valor_proposta', '')::numeric,
     NULLIF(c->>'id_artigo_vinted', ''), NULLIF(c->>'url_conversa', ''),
     COALESCE((c->>'item_fechado')::boolean, false),
-    false, true,
+    false, true, v_pasta,
     COALESCE(c->'mensagens', '[]'::jsonb),
     COALESCE((c->>'data_atualizacao')::timestamptz, now())
   )
@@ -109,6 +180,7 @@ BEGIN
     item_fechado = EXCLUDED.item_fechado,
     suprimida = false,
     adicionada_manual = true,
+    pasta_id = COALESCE(v_pasta, conversas.pasta_id),
     mensagens_json = CASE
       WHEN jsonb_array_length(EXCLUDED.mensagens_json) > 0 THEN EXCLUDED.mensagens_json
       ELSE conversas.mensagens_json
@@ -123,3 +195,5 @@ REVOKE ALL ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb) TO anon, authenticated;
 REVOKE ALL ON FUNCTION public.add_conversa_manual(text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.add_conversa_manual(text, jsonb) TO anon, authenticated;
+REVOKE ALL ON FUNCTION public.get_pastas_ext(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_pastas_ext(text) TO anon, authenticated;

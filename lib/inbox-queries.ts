@@ -1,4 +1,4 @@
-import type { Conversa, InboxCounts } from '@/lib/types'
+import type { Conversa, InboxCounts, PastaConversas } from '@/lib/types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 type Client = SupabaseClient
@@ -41,4 +41,38 @@ export async function removerConversas(supabase: Client, ids: string[]) {
     .from('conversas')
     .update({ suprimida: true, adicionada_manual: false, fixada_em: null })
     .in('id', ids)
+}
+
+// ---------- Pastas ----------
+
+export async function loadPastas(supabase: Client): Promise<PastaConversas[]> {
+  const { data, error } = await supabase
+    .from('pastas_conversas')
+    .select('*')
+    .order('nome', { ascending: true })
+  if (error) return []
+  return (data ?? []) as PastaConversas[]
+}
+
+export async function criarPasta(supabase: Client, nome: string) {
+  const { error } = await supabase.from('pastas_conversas').insert({ nome: nome.trim() })
+  if (error) throw error
+}
+
+export async function eliminarPasta(supabase: Client, id: string) {
+  // As conversas ficam sem pasta (FK ON DELETE SET NULL)
+  const { error } = await supabase.from('pastas_conversas').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function moverConversaParaPasta(
+  supabase: Client,
+  conversaId: string,
+  pastaId: string | null
+) {
+  const { error } = await supabase
+    .from('conversas')
+    .update({ pasta_id: pastaId })
+    .eq('id', conversaId)
+  if (error) throw error
 }

@@ -1,8 +1,14 @@
 import { SYNC_INTERVAL_MS } from './config.js'
-import { addConversaToSupabase, getSyncSecret, saveSyncState, syncToSupabase } from './sync.js'
+import {
+  addConversaToSupabase,
+  getPastasFromSupabase,
+  getSyncSecret,
+  saveSyncState,
+  syncToSupabase,
+} from './sync.js'
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v2.0 instalada')
+  console.log('Vinted Hub Sync v2.1 instalada')
   chrome.storage.local.set({ autoSyncEnabled: true })
 })
 
@@ -10,6 +16,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'syncFromPage') {
     handleSync(message.tabId ?? sender.tab?.id, message.manual === true)
       .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }))
+    return true
+  }
+
+  if (message.action === 'getPastas') {
+    getSyncSecret()
+      .then((secret) => {
+        if (!secret) throw new Error('Abre o dashboard primeiro para ligar a extensão.')
+        return getPastasFromSupabase(secret)
+      })
+      .then((pastas) => sendResponse({ ok: true, pastas }))
       .catch((err) => sendResponse({ ok: false, error: err.message }))
     return true
   }
@@ -38,7 +55,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function handleAddConversa(conversa) {
   const syncSecret = await getSyncSecret()
   if (!syncSecret) {
-    throw new Error('Abre o dashboard → /setup para ligar a extensão.')
+    throw new Error('Abre o dashboard (com login) para ligar a extensão.')
   }
   if (!conversa?.id_vinted) {
     throw new Error('Conversa inválida.')
@@ -49,7 +66,7 @@ async function handleAddConversa(conversa) {
 async function handleSync(explicitTabId, manual) {
   const syncSecret = await getSyncSecret()
   if (!syncSecret) {
-    const err = 'Abre o dashboard → /setup para ligar a extensão automaticamente.'
+    const err = 'Abre o dashboard (com login) para ligar a extensão automaticamente.'
     await saveSyncState({ ok: false, error: err })
     throw new Error(err)
   }

@@ -15,7 +15,7 @@ async function refreshStatus() {
   }
 
   if (!status.syncSecret) {
-    showStatus('Não ligada. Abre /setup no dashboard (login necessário).', 'err', 'err')
+    showStatus('Não ligada. Abre o dashboard e faz login.', 'err', 'err')
     return
   }
 

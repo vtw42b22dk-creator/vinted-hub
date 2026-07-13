@@ -2,7 +2,7 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL } from './config.js'
 
 export async function syncToSupabase(data, syncSecret) {
   if (!syncSecret) {
-    throw new Error('Sync secret em falta. Abre o dashboard → /setup (liga automaticamente).')
+    throw new Error('Sync secret em falta. Abre o dashboard com login (liga automaticamente).')
   }
 
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/sync_from_vinted`, {
@@ -46,6 +46,26 @@ export async function syncToSupabase(data, syncSecret) {
     message: parts.join(', ') || 'Sync OK',
     artigos: json.artigos || 0,
     conversas: json.conversas || 0,
+  }
+}
+
+export async function getPastasFromSupabase(syncSecret) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_pastas_ext`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({ p_sync_secret: syncSecret }),
+  })
+
+  if (!res.ok) return []
+  try {
+    const json = await res.json()
+    return Array.isArray(json) ? json : []
+  } catch {
+    return []
   }
 }
 

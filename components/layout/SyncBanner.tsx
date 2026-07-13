@@ -1,13 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/AuthContext'
 
+// Componente invisível: envia o sync secret à extensão Chrome em qualquer página.
 export default function SyncBanner() {
   const auth = useAuth()
-  const [linked, setLinked] = useState<boolean | null>(null)
 
   useEffect(() => {
     if (!auth.user) return
@@ -20,10 +19,7 @@ export default function SyncBanner() {
         .eq('id', auth.user!.id)
         .maybeSingle()
 
-      if (!profile?.sync_secret) {
-        setLinked(false)
-        return
-      }
+      if (!profile?.sync_secret) return
 
       window.postMessage(
         {
@@ -32,7 +28,6 @@ export default function SyncBanner() {
         },
         '*'
       )
-      setLinked(true)
     }
 
     broadcastConfig()
@@ -40,19 +35,5 @@ export default function SyncBanner() {
     return () => clearInterval(id)
   }, [auth.user])
 
-  if (!auth.user || linked === null) return null
-
-  if (linked) {
-    return (
-      <div className="border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-center text-sm text-emerald-800">
-        Extensão: sync automático ativo (10s) — mantém <strong>vinted.pt</strong> aberta
-      </div>
-    )
-  }
-
-  return (
-    <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-900">
-      Liga a extensão em <Link href="/setup" className="font-medium underline">/setup</Link> e recarrega-a no Chrome
-    </div>
-  )
+  return null
 }

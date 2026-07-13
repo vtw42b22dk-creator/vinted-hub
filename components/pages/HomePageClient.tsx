@@ -3,16 +3,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import AppShell from '@/components/layout/AppShell'
-import DashboardClient from '@/components/DashboardClient'
 import { createClient } from '@/lib/supabase/client'
-import type { Artigo, InboxCounts } from '@/lib/types'
+import type { InboxCounts } from '@/lib/types'
 import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
-import { calcularMetricas, calcularMetricasVinted, formatEuro } from '@/lib/utils'
+import { calcularMetricasVinted, formatEuro } from '@/lib/utils'
 
 import { getInboxCounts } from '@/lib/inbox-queries'
 
 export default function HomePageClient() {
-  const [artigos, setArtigos] = useState<Artigo[]>([])
   const [inboxCounts, setInboxCounts] = useState<InboxCounts>({ total: 0 })
   const [vintedMetrics, setVintedMetrics] = useState(calcularMetricasVinted([]))
   const [error, setError] = useState<string | null>(null)
@@ -20,18 +18,16 @@ export default function HomePageClient() {
 
   const load = useCallback(async () => {
     const supabase = createClient()
-    const [artigosResult, vintedResult, counts] = await Promise.all([
-      supabase.from('artigos').select('*').order('criado_em', { ascending: false }),
+    const [vintedResult, counts] = await Promise.all([
       supabase.from('artigos_vinted_com_lucro').select('*'),
       getInboxCounts(supabase),
     ])
 
-    setArtigos((artigosResult.data ?? []) as Artigo[])
     setInboxCounts(counts)
     setVintedMetrics(calcularMetricasVinted(vintedResult.data ?? []))
 
-    if (artigosResult.error && vintedResult.error) {
-      setError('Verifica o Supabase e executa os SQLs em /setup.')
+    if (vintedResult.error) {
+      setError('Verifica o Supabase — corre supabase/sync-rpc.sql no SQL Editor.')
     } else {
       setError(null)
     }
@@ -42,9 +38,7 @@ export default function HomePageClient() {
     load()
   }, [load])
 
-  useSupabaseRealtime(load, ['conversas', 'artigos_vinted', 'artigos'])
-
-  const metrics = calcularMetricas(artigos)
+  useSupabaseRealtime(load, ['conversas', 'artigos_vinted'])
 
   if (loading) {
     return (
@@ -63,6 +57,12 @@ export default function HomePageClient() {
           <h2 className="text-2xl font-bold text-slate-900">Visão Geral</h2>
           <p className="mt-1 text-sm text-slate-500">Hub central do teu negócio Vinted</p>
         </div>
+
+        {error && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {error}
+          </div>
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Link
@@ -85,7 +85,24 @@ export default function HomePageClient() {
           </Link>
         </div>
 
-        <DashboardClient artigos={artigos} metrics={metrics} error={error} onRefresh={load} />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Artigos à venda</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">{vintedMetrics.totalAtivos}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Investimento total</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">
+              {formatEuro(vintedMetrics.investimentoTotal)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">Lucro realizado</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-700">
+              {formatEuro(vintedMetrics.lucroRealizado)}
+            </p>
+          </div>
+        </div>
       </div>
     </AppShell>
   )

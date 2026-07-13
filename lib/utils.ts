@@ -89,38 +89,6 @@ export function statusVintedBadgeClasses(status: StatusArtigoVinted): string {
   }
 }
 
-export function calcularMetricas(
-  artigos: {
-    status: StatusArtigo
-    preco_custo: number
-    preco_venda_previsto: number
-    preco_venda_real: number | null
-  }[]
-) {
-  const emStock = artigos.filter((a) => a.status === 'Em Stock')
-
-  const investimentoTotal = artigos.reduce((sum, a) => sum + Number(a.preco_custo), 0)
-
-  const lucroPotencial = emStock.reduce(
-    (sum, a) => sum + (Number(a.preco_venda_previsto) - Number(a.preco_custo)),
-    0
-  )
-
-  const lucroRealLiquido = artigos
-    .filter((a) => a.status === 'Vendido' && a.preco_venda_real != null)
-    .reduce(
-      (sum, a) => sum + (Number(a.preco_venda_real) - Number(a.preco_custo)),
-      0
-    )
-
-  return {
-    totalEmStock: emStock.length,
-    investimentoTotal,
-    lucroPotencial,
-    lucroRealLiquido,
-  }
-}
-
 export function calcularMetricasVinted(artigos: ArtigoVinted[]) {
   const aVenda = artigos.filter(
     (a) => a.status_artigo === 'ativo' || a.status_artigo === 'reservado'

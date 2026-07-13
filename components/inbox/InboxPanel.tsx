@@ -3,23 +3,114 @@
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import ConversaThreadModal from '@/components/inbox/ConversaThreadModal'
-import { guardarNotas, removerConversas } from '@/lib/inbox-queries'
-import type { Conversa } from '@/lib/types'
+import {
+  criarPasta,
+  eliminarPasta,
+  guardarNotas,
+  moverConversaParaPasta,
+  removerConversas,
+} from '@/lib/inbox-queries'
+import type { Conversa, PastaConversas } from '@/lib/types'
 import { formatEuro, formatRelativeTime } from '@/lib/utils'
 
-export function LiveIndicator({ status }: { status: 'connecting' | 'live' | 'polling' }) {
-  const label =
-    status === 'live' ? 'Ao vivo' : status === 'polling' ? 'Atualização automática' : 'A ligar…'
-  const color =
-    status === 'live' ? 'bg-emerald-500' : status === 'polling' ? 'bg-amber-400' : 'bg-slate-300'
+// ---------- Pastas ----------
+
+interface PastasBarProps {
+  pastas: PastaConversas[]
+  conversas: Conversa[]
+  activePasta: string | null | 'todas'
+  onSelect: (pastaId: string | null | 'todas') => void
+  onRefresh?: () => void
+}
+
+export function PastasBar({ pastas, conversas, activePasta, onSelect, onRefresh }: PastasBarProps) {
+  function countFor(pastaId: string | null) {
+    return conversas.filter((c) => (c.pasta_id ?? null) === pastaId).length
+  }
+
+  async function handleCriar() {
+    const nome = prompt('Nome da nova pasta:')?.trim()
+    if (!nome) return
+    const supabase = createClient()
+    await criarPasta(supabase, nome)
+    onRefresh?.()
+  }
+
+  async function handleEliminar(pasta: PastaConversas) {
+    if (
+      !confirm(
+        `Eliminar a pasta "${pasta.nome}"? As conversas não são apagadas — ficam sem pasta.`
+      )
+    )
+      return
+    const supabase = createClient()
+    await eliminarPasta(supabase, pasta.id)
+    if (activePasta === pasta.id) onSelect('todas')
+    onRefresh?.()
+  }
+
+  const chipBase = 'shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors'
+  const chipActive = 'bg-slate-900 text-white shadow-sm'
+  const chipIdle = 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
 
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">
-      <span className={`h-2 w-2 rounded-full ${color} ${status === 'live' ? 'animate-pulse' : ''}`} />
-      {label}
-    </span>
+    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <button
+        type="button"
+        onClick={() => onSelect('todas')}
+        className={`${chipBase} ${activePasta === 'todas' ? chipActive : chipIdle}`}
+      >
+        Todas ({conversas.length})
+      </button>
+      <button
+        type="button"
+        onClick={() => onSelect(null)}
+        className={`${chipBase} ${activePasta === null ? chipActive : chipIdle}`}
+      >
+        Sem pasta ({countFor(null)})
+      </button>
+
+      {pastas.map((pasta) => (
+        <span
+          key={pasta.id}
+          className={`inline-flex shrink-0 items-center overflow-hidden rounded-lg ${
+            activePasta === pasta.id ? chipActive : chipIdle
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => onSelect(pasta.id)}
+            className="px-3 py-2 text-sm font-medium"
+          >
+            📁 {pasta.nome} ({countFor(pasta.id)})
+          </button>
+          <button
+            type="button"
+            onClick={() => handleEliminar(pasta)}
+            title={`Eliminar pasta ${pasta.nome}`}
+            className={`px-2 py-2 text-xs ${
+              activePasta === pasta.id
+                ? 'text-white/60 hover:text-white'
+                : 'text-slate-400 hover:text-red-600'
+            }`}
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+
+      <button
+        type="button"
+        onClick={handleCriar}
+        className="shrink-0 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-500 hover:border-slate-400 hover:text-slate-700"
+      >
+        + Nova pasta
+      </button>
+    </div>
   )
 }
+
+// ---------- Apontamentos ----------
 
 function NotasEditor({ conversa }: { conversa: Conversa }) {
   const [notas, setNotas] = useState(conversa.notas ?? '')
@@ -27,7 +118,6 @@ function NotasEditor({ conversa }: { conversa: Conversa }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedRef = useRef(conversa.notas ?? '')
 
-  // Se chegar valor novo do realtime e não estivermos a editar, sincroniza
   useEffect(() => {
     const incoming = conversa.notas ?? ''
     if (incoming !== lastSavedRef.current && estado === 'idle' && notas === lastSavedRef.current) {
@@ -84,22 +174,34 @@ function NotasEditor({ conversa }: { conversa: Conversa }) {
   )
 }
 
+// ---------- Cartão de conversa ----------
+
 interface ConversaCardProps {
   conversa: Conversa
+  pastas: PastaConversas[]
   onViewThread: (conversa: Conversa) => void
   onOpenVinted: (conversa: Conversa) => void
   onTogglePin: (conversa: Conversa) => void
   onRemove: (conversa: Conversa) => void
+  onRefresh?: () => void
 }
 
 export function ConversaCard({
   conversa,
+  pastas,
   onViewThread,
   onOpenVinted,
   onTogglePin,
   onRemove,
+  onRefresh,
 }: ConversaCardProps) {
   const pinned = Boolean(conversa.fixada_em)
+
+  async function handleMove(pastaId: string) {
+    const supabase = createClient()
+    await moverConversaParaPasta(supabase, conversa.id, pastaId || null)
+    onRefresh?.()
+  }
 
   return (
     <article
@@ -167,6 +269,19 @@ export function ConversaCard({
             >
               {pinned ? 'Desafixar' : 'Fixar'}
             </button>
+            <select
+              value={conversa.pasta_id ?? ''}
+              onChange={(e) => handleMove(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600"
+              title="Mover para pasta"
+            >
+              <option value="">Sem pasta</option>
+              {pastas.map((p) => (
+                <option key={p.id} value={p.id}>
+                  📁 {p.nome}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => onRemove(conversa)}
@@ -183,12 +298,15 @@ export function ConversaCard({
   )
 }
 
+// ---------- Lista ----------
+
 interface InboxListProps {
   conversas: Conversa[]
+  pastas: PastaConversas[]
   onRefresh?: () => void
 }
 
-export function InboxList({ conversas, onRefresh }: InboxListProps) {
+export function InboxList({ conversas, pastas, onRefresh }: InboxListProps) {
   const [thread, setThread] = useState<Conversa | null>(null)
 
   function handleOpenVinted(conversa: Conversa) {
@@ -215,11 +333,11 @@ export function InboxList({ conversas, onRefresh }: InboxListProps) {
   if (conversas.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
-        <p className="text-sm font-medium text-slate-700">Ainda não adicionaste conversas.</p>
+        <p className="text-sm font-medium text-slate-700">Nenhuma conversa aqui.</p>
         <p className="mt-2 text-sm text-slate-500">
-          Abre a tua inbox na Vinted e clica no botão <strong>＋ Dashboard</strong> ao lado de uma
-          conversa (ou <strong>＋ Adicionar ao dashboard</strong> dentro da conversa) para a
-          guardares aqui com apontamentos.
+          Abre uma conversa na Vinted e clica no botão{' '}
+          <strong>＋ Adicionar conversa ao dashboard</strong> no canto inferior esquerdo do ecrã.
+          Podes escolher logo a pasta onde guardar.
         </p>
       </div>
     )
@@ -232,10 +350,12 @@ export function InboxList({ conversas, onRefresh }: InboxListProps) {
           <ConversaCard
             key={conversa.id}
             conversa={conversa}
+            pastas={pastas}
             onViewThread={setThread}
             onOpenVinted={handleOpenVinted}
             onTogglePin={handleTogglePin}
             onRemove={handleRemove}
+            onRefresh={onRefresh}
           />
         ))}
       </div>

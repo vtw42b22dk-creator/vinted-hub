@@ -1,11 +1,11 @@
-// Content script — botões "Adicionar ao dashboard" na inbox da Vinted
-// + sync automático do inventário
+// Content script — botão "Adicionar ao dashboard" fixo no canto do ecrã
+// + sync automático do inventário (silencioso, em segundo plano)
 
 let syncTimer = null
 let lastUrl = location.href
 let syncing = false
 
-// ---------- Sync automático (inventário) ----------
+// ---------- Sync automático (inventário, silencioso) ----------
 
 function scheduleAutoSync(delayMs = 5000) {
   clearTimeout(syncTimer)
@@ -24,180 +24,169 @@ async function runAutoSync() {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.action === 'extract') {
-    extractAll()
-      .then((data) => sendResponse({ data, ok: true }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }))
-    return true
-  }
-})
+// ---------- Botão fixo no canto ----------
 
-async function extractAll() {
-  if (!window.__vintedHub) {
-    throw new Error('API Vinted não carregada. Recarrega a página.')
-  }
-  return window.__vintedHub.syncAllFromVinted()
-}
-
-// ---------- Adicionar conversa ao dashboard ----------
-
-const BTN_CLASS = 'vinted-hub-add-btn'
-
-async function addConversaToDashboard(conversationId, btn) {
-  if (!window.__vintedHub?.buildConversaManual) {
-    setBtnState(btn, 'erro', '✗ Recarrega (F5)')
-    return
-  }
-
-  setBtnState(btn, 'loading', '…')
-  try {
-    const conversa = await window.__vintedHub.buildConversaManual(conversationId)
-    const result = await chrome.runtime.sendMessage({ action: 'addConversa', conversa })
-    if (result?.ok) {
-      setBtnState(btn, 'ok', '✓ No dashboard')
-    } else {
-      setBtnState(btn, 'erro', `✗ ${result?.error || 'Erro'}`)
-    }
-  } catch (err) {
-    setBtnState(btn, 'erro', `✗ ${err.message || 'Erro'}`)
-  }
-
-  setTimeout(() => setBtnState(btn, 'idle'), 4000)
-}
-
-function setBtnState(btn, state, label) {
-  btn.dataset.state = state
-  btn.textContent = label || '＋ Dashboard'
-  btn.disabled = state === 'loading'
-  btn.style.background =
-    state === 'ok' ? '#059669' : state === 'erro' ? '#dc2626' : '#0f172a'
-}
-
-function makeAddButton(conversationId, small) {
-  const btn = document.createElement('button')
-  btn.className = BTN_CLASS
-  btn.type = 'button'
-  btn.textContent = '＋ Dashboard'
-  btn.title = 'Adicionar esta conversa ao dashboard'
-  btn.style.cssText = small
-    ? 'flex-shrink:0;margin:4px 6px;padding:3px 8px;background:#0f172a;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;z-index:9999'
-    : 'padding:8px 14px;background:#0f172a;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif'
-
-  btn.addEventListener('click', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    addConversaToDashboard(conversationId, btn)
-  })
-
-  return btn
-}
+const WRAPPER_ID = 'vinted-hub-add-wrapper'
 
 function extractConversationId(href) {
   const match = String(href || '').match(/\/inbox\/(\d+)/)
   return match ? match[1] : null
 }
 
-// Botão pequeno ao lado de cada conversa na lista da inbox
-function injectListButtons() {
-  const links = document.querySelectorAll('a[href*="/inbox/"]')
-
-  for (const link of links) {
-    const id = extractConversationId(link.getAttribute('href'))
-    if (!id) continue
-    if (link.querySelector(`.${BTN_CLASS}`) || link.dataset.vintedHubBtn) continue
-
-    link.dataset.vintedHubBtn = '1'
-    link.style.position = link.style.position || 'relative'
-
-    const btn = makeAddButton(id, true)
-    btn.style.position = 'absolute'
-    btn.style.right = '8px'
-    btn.style.bottom = '6px'
-    link.appendChild(btn)
-  }
+function currentConversationId() {
+  return extractConversationId(location.pathname)
 }
 
-// Botão fixo quando estás dentro de uma conversa
-function injectConversationButton() {
-  const id = extractConversationId(location.pathname)
-  const existing = document.getElementById('vinted-hub-conv-btn')
+function ensureCornerButton() {
+  const onInbox = location.pathname.includes('/inbox')
+  let wrapper = document.getElementById(WRAPPER_ID)
 
-  if (!id) {
-    existing?.remove()
+  if (!onInbox) {
+    wrapper?.remove()
     return
   }
 
-  if (existing) {
-    if (existing.dataset.convId === id) return
-    existing.remove()
-  }
+  if (wrapper) return
 
-  const wrapper = document.createElement('div')
-  wrapper.id = 'vinted-hub-conv-btn'
-  wrapper.dataset.convId = id
+  wrapper = document.createElement('div')
+  wrapper.id = WRAPPER_ID
   wrapper.style.cssText =
-    'position:fixed;top:70px;right:24px;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,.25);border-radius:10px'
+    'position:fixed;bottom:20px;left:20px;z-index:2147483647;display:flex;flex-direction:column;align-items:flex-start;gap:8px;font-family:system-ui,sans-serif'
 
-  const btn = makeAddButton(id, false)
-  btn.textContent = '＋ Adicionar ao dashboard'
+  const menu = document.createElement('div')
+  menu.id = 'vinted-hub-pasta-menu'
+  menu.style.cssText =
+    'display:none;flex-direction:column;gap:2px;min-width:220px;max-height:280px;overflow-y:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.2);padding:6px'
+
+  const btn = document.createElement('button')
+  btn.id = 'vinted-hub-add-btn'
+  btn.type = 'button'
+  btn.style.cssText =
+    'padding:12px 18px;background:#0f172a;color:#fff;border:none;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.3)'
+  setCornerState(btn, 'idle')
+
+  btn.addEventListener('click', () => onCornerClick(btn, menu))
+
+  wrapper.appendChild(menu)
   wrapper.appendChild(btn)
   document.body.appendChild(wrapper)
 }
 
-function watchDom() {
-  const observer = new MutationObserver(() => {
-    if (!location.pathname.includes('/inbox')) return
-    injectListButtons()
-    injectConversationButton()
-  })
-  observer.observe(document.body, { childList: true, subtree: true })
-
-  injectListButtons()
-  injectConversationButton()
+function setCornerState(btn, state, label) {
+  btn.dataset.state = state
+  btn.disabled = state === 'loading'
+  btn.textContent =
+    label ||
+    (state === 'loading' ? 'A adicionar…' : '＋ Adicionar conversa ao dashboard')
+  btn.style.background =
+    state === 'ok' ? '#059669' : state === 'erro' ? '#dc2626' : '#0f172a'
 }
 
-// ---------- Botão de sync do inventário ----------
+async function onCornerClick(btn, menu) {
+  // fecha o menu se já estiver aberto
+  if (menu.style.display === 'flex') {
+    menu.style.display = 'none'
+    return
+  }
 
-function injectSyncButton() {
-  if (document.getElementById('vinted-hub-sync-btn')) return
+  const conversationId = currentConversationId()
+  if (!conversationId) {
+    setCornerState(btn, 'erro', 'Abre uma conversa primeiro')
+    setTimeout(() => setCornerState(btn, 'idle'), 3000)
+    return
+  }
 
-  const btn = document.createElement('button')
-  btn.id = 'vinted-hub-sync-btn'
-  btn.textContent = '⟳ Sync inventário'
-  btn.style.cssText =
-    'position:fixed;bottom:24px;right:24px;z-index:99999;padding:12px 18px;background:#0f172a;color:#fff;border:none;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.25);font-family:system-ui,sans-serif'
+  setCornerState(btn, 'loading', 'A carregar pastas…')
+  let pastas = []
+  try {
+    const result = await chrome.runtime.sendMessage({ action: 'getPastas' })
+    if (result?.ok) pastas = result.pastas || []
+  } catch {
+    // sem pastas — mostra só "Sem pasta"
+  }
+  setCornerState(btn, 'idle')
 
-  btn.addEventListener('click', async () => {
-    btn.textContent = 'A sincronizar…'
-    btn.disabled = true
-    try {
-      const result = await chrome.runtime.sendMessage({ action: 'syncFromPage', manual: true })
-      btn.textContent = result?.ok ? `✓ ${result.message}` : '✗ Erro'
-    } catch {
-      btn.textContent = '✗ Recarrega extensão'
+  renderPastaMenu(menu, pastas, (pastaId) => {
+    menu.style.display = 'none'
+    addConversa(btn, conversationId, pastaId)
+  })
+  menu.style.display = 'flex'
+}
+
+function renderPastaMenu(menu, pastas, onPick) {
+  menu.innerHTML = ''
+
+  const title = document.createElement('p')
+  title.textContent = 'Guardar em que pasta?'
+  title.style.cssText =
+    'margin:4px 8px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#64748b'
+  menu.appendChild(title)
+
+  const options = [{ id: null, nome: '📥 Sem pasta' }].concat(
+    pastas.map((p) => ({ id: p.id, nome: `📁 ${p.nome}` }))
+  )
+
+  for (const opt of options) {
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.textContent = opt.nome
+    item.style.cssText =
+      'text-align:left;padding:8px 10px;background:none;border:none;border-radius:8px;font-size:13px;color:#0f172a;cursor:pointer'
+    item.addEventListener('mouseenter', () => (item.style.background = '#f1f5f9'))
+    item.addEventListener('mouseleave', () => (item.style.background = 'none'))
+    item.addEventListener('click', () => onPick(opt.id))
+    menu.appendChild(item)
+  }
+
+  if (!pastas.length) {
+    const hint = document.createElement('p')
+    hint.textContent = 'Cria pastas no dashboard → Mensagens'
+    hint.style.cssText = 'margin:4px 8px 4px;font-size:11px;color:#94a3b8'
+    menu.appendChild(hint)
+  }
+}
+
+async function addConversa(btn, conversationId, pastaId) {
+  if (!window.__vintedHub?.buildConversaManual) {
+    setCornerState(btn, 'erro', '✗ Recarrega a página (F5)')
+    setTimeout(() => setCornerState(btn, 'idle'), 4000)
+    return
+  }
+
+  setCornerState(btn, 'loading')
+  try {
+    const conversa = await window.__vintedHub.buildConversaManual(conversationId)
+    if (pastaId) conversa.pasta_id = pastaId
+
+    const result = await chrome.runtime.sendMessage({ action: 'addConversa', conversa })
+    if (result?.ok) {
+      setCornerState(btn, 'ok', '✓ Adicionada ao dashboard')
+    } else {
+      setCornerState(btn, 'erro', `✗ ${result?.error || 'Erro'}`)
     }
-    setTimeout(() => {
-      btn.textContent = '⟳ Sync inventário'
-      btn.disabled = false
-    }, 4000)
-  })
+  } catch (err) {
+    setCornerState(btn, 'erro', `✗ ${err.message || 'Erro'}`)
+  }
 
-  document.body.appendChild(btn)
+  setTimeout(() => setCornerState(btn, 'idle'), 4000)
 }
+
+// ---------- Init ----------
 
 function watchNavigation() {
   setInterval(() => {
     if (location.href !== lastUrl) {
       lastUrl = location.href
-      injectConversationButton()
+      ensureCornerButton()
     }
   }, 800)
+
+  const observer = new MutationObserver(() => ensureCornerButton())
+  observer.observe(document.body, { childList: true })
 }
 
 function init() {
-  injectSyncButton()
-  watchDom()
+  ensureCornerButton()
   watchNavigation()
   scheduleAutoSync(4000)
 }
