@@ -106,8 +106,38 @@ interface ArtigoCardProps {
   onRefresh?: () => void
 }
 
+function StarButton({
+  ativo,
+  busy,
+  onToggle,
+}: {
+  ativo: boolean
+  busy: boolean
+  onToggle: (e: React.MouseEvent) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={busy}
+      aria-pressed={ativo}
+      title={ativo ? 'Remover dos relevantes' : 'Marcar como relevante'}
+      className={`absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full shadow-sm ring-1 transition disabled:opacity-50 ${
+        ativo
+          ? 'bg-amber-400 text-white ring-amber-500'
+          : 'bg-white/90 text-slate-400 ring-slate-200 hover:text-amber-500'
+      }`}
+    >
+      <svg viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+        <path d="M10 1.6l2.47 5.01 5.53.8-4 3.9.94 5.5L10 14.7l-4.94 2.6.94-5.5-4-3.9 5.53-.8z" />
+      </svg>
+    </button>
+  )
+}
+
 function ArtigoCard({ artigo, onRefresh }: ArtigoCardProps) {
   const [aberto, setAberto] = useState(false)
+  const [marcando, setMarcando] = useState(false)
   const lucro = Number(artigo.lucro_bruto ?? artigo.preco_venda - artigo.preco_custo)
   const margem = Number(artigo.margem_percentual ?? 0)
   const meta = [artigo.marca, artigo.tamanho].filter(Boolean).join(' · ')
@@ -119,15 +149,29 @@ function ArtigoCard({ artigo, onRefresh }: ArtigoCardProps) {
     { label: 'Estado', value: statusVintedLabel(artigo.status_artigo) },
   ]
 
+  async function toggleRelevante(e: React.MouseEvent) {
+    e.stopPropagation()
+    setMarcando(true)
+    const supabase = createClient()
+    await supabase
+      .from('artigos_vinted')
+      .update({ relevante: !artigo.relevante })
+      .eq('id', artigo.id)
+    setMarcando(false)
+    onRefresh?.()
+  }
+
   return (
     <article className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <button
-        type="button"
-        onClick={() => setAberto((v) => !v)}
-        className="flex gap-3 text-left"
-      >
-        <ArtigoFoto fotoUrl={artigo.foto_url} nome={artigo.nome} />
-        <div className="min-w-0 flex-1">
+      <div className="relative flex gap-3">
+        <StarButton ativo={Boolean(artigo.relevante)} busy={marcando} onToggle={toggleRelevante} />
+        <button
+          type="button"
+          onClick={() => setAberto((v) => !v)}
+          className="flex flex-1 gap-3 text-left"
+        >
+          <ArtigoFoto fotoUrl={artigo.foto_url} nome={artigo.nome} />
+          <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900">
               {artigo.nome}
@@ -140,8 +184,9 @@ function ArtigoCard({ artigo, onRefresh }: ArtigoCardProps) {
           {artigo.categoria && (
             <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-400">{artigo.categoria}</p>
           )}
-        </div>
-      </button>
+          </div>
+        </button>
+      </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-sm">
         <div>

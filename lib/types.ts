@@ -79,6 +79,7 @@ export interface ArtigoVinted {
   categoria: string | null
   foto_url: string | null
   url_vinted: string | null
+  relevante?: boolean
   sincronizado_em: string
   atualizado_em: string
   criado_em: string

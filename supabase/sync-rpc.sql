@@ -32,6 +32,8 @@ ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS pasta_id UUID REFERENCES p
 -- Detalhe do artigo (para o modal do inventário)
 ALTER TABLE public.artigos_vinted ADD COLUMN IF NOT EXISTS descricao TEXT;
 ALTER TABLE public.artigos_vinted ADD COLUMN IF NOT EXISTS categoria TEXT;
+-- Marcar anúncios como "relevantes" (aba dedicada no dashboard)
+ALTER TABLE public.artigos_vinted ADD COLUMN IF NOT EXISTS relevante BOOLEAN NOT NULL DEFAULT false;
 
 -- Recriar a view para incluir as colunas novas
 DROP VIEW IF EXISTS public.artigos_vinted_com_lucro;
