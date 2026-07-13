@@ -72,7 +72,12 @@ export interface Conversa {
   data_atualizacao: string
   criado_em: string
   aberta_em?: string | null
+  vista_em?: string | null
   suprimida?: boolean
+  oculta_por_responder?: boolean
+  precisa_responder?: boolean
+  vinted_unread?: boolean
+  eh_proposta?: boolean
   iniciada_por?: IniciadaPor | null
   fixada_em?: string | null
   mensagens_json?: MensagemConversa[]

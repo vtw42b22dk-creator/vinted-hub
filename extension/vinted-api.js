@@ -1,8 +1,9 @@
 // Cliente da API interna Vinted (usa cookies da sessão do browser)
 // Depende de vinted-inbox.js (carregado antes no manifest)
 
-const MESSAGE_FETCH_CONCURRENCY = 5
-const MESSAGE_FETCH_BATCH_UNREAD = 80
+const MESSAGE_FETCH_CONCURRENCY = 4
+const MESSAGE_FETCH_MAX = 12
+const MESSAGE_FETCH_BATCH_UNREAD = 50
 
 function getCsrfToken() {
   return (
@@ -195,6 +196,7 @@ function mapConversation(raw, currentUserId) {
     vinted_unread: meta.unread,
     precisa_responder: meta.precisa_responder,
     iniciada_por: meta.iniciada_por,
+    eh_proposta: meta.eh_proposta,
     data_atualizacao: updatedAt,
     mensagens: [],
     _raw: raw,
@@ -405,7 +407,7 @@ async function fetchConversationMessages(conversationId, currentUserId) {
   }
 
   if (!collected.length) return []
-  return mapMessagesAll(collected, currentUserId)
+  return mapMessagesAll(collected, currentUserId).slice(-MESSAGE_FETCH_MAX)
 }
 
 async function runPool(items, worker, concurrency = MESSAGE_FETCH_CONCURRENCY) {
@@ -427,7 +429,9 @@ async function runPool(items, worker, concurrency = MESSAGE_FETCH_CONCURRENCY) {
 async function enrichConversasWithMessages(conversas, userId) {
   const withMeta = conversas.map((c) => ({ ...c, _userId: userId }))
 
-  const toEnrich = withMeta.filter((c) => c.vinted_unread || c.precisa_responder).slice(0, MESSAGE_FETCH_BATCH_UNREAD)
+  const toEnrich = withMeta
+    .filter((c) => c.precisa_responder && c.vinted_unread)
+    .slice(0, MESSAGE_FETCH_BATCH_UNREAD)
 
   const toEnrichIds = new Set(toEnrich.map((c) => c.id_vinted))
 

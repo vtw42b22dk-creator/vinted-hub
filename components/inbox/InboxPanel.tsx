@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import ConversaThreadModal from '@/components/inbox/ConversaThreadModal'
-import { statusAposVista } from '@/lib/inbox-classify'
+import { arquivarConversas, marcarComoVista } from '@/lib/inbox-queries'
 import type { Conversa, InboxCounts, StatusInbox } from '@/lib/types'
 import { formatEuro, formatRelativeTime, INBOX_FILTERS, inboxFilterClasses } from '@/lib/utils'
 
@@ -164,7 +164,7 @@ export function ConversaCard({
   onOpenVinted,
   onTogglePin,
 }: ConversaCardProps) {
-  const needsReply = conversa.ultima_mensagem_de === 'comprador' && conversa.status_inbox === 'por_responder'
+  const needsReply = conversa.precisa_responder && !conversa.oculta_por_responder
   const pinned = Boolean(conversa.fixada_em)
   const canPin = filtro !== 'por_responder'
 
@@ -261,32 +261,16 @@ interface InboxListProps {
 async function markConversasViewed(items: Conversa[]) {
   if (items.length === 0) return
   const supabase = createClient()
-  const now = new Date().toISOString()
-
-  await Promise.all(
-    items.map((c) =>
-      supabase
-        .from('conversas')
-        .update({
-          aberta_em: now,
-          status_inbox: statusAposVista(c.iniciada_por),
-        })
-        .eq('id', c.id)
-    )
+  await marcarComoVista(
+    supabase,
+    items.map((c) => c.id)
   )
 }
 
-async function archiveConversas(ids: string[]) {
+async function archiveConversasById(ids: string[]) {
   if (ids.length === 0) return
   const supabase = createClient()
-  await supabase
-    .from('conversas')
-    .update({
-      suprimida: true,
-      status_inbox: 'arquivada',
-      fixada_em: null,
-    })
-    .in('id', ids)
+  await arquivarConversas(supabase, ids)
 }
 
 export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
@@ -330,7 +314,7 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
         : `Arquivar ${items.length} conversa(s)?`
       if (!confirm(msg)) return
       setBusy(true)
-      await archiveConversas(items.map((c) => c.id))
+      await archiveConversasById(items.map((c) => c.id))
     }
 
     setSelectedIds(new Set())
@@ -349,23 +333,17 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
   }
 
   async function markViewed(conversa: Conversa) {
-    if (conversa.status_inbox !== 'por_responder') return conversa
+    if (!conversa.precisa_responder || conversa.oculta_por_responder) return conversa
 
     const supabase = createClient()
-    const novoStatus = statusAposVista(conversa.iniciada_por)
-    await supabase
-      .from('conversas')
-      .update({
-        aberta_em: new Date().toISOString(),
-        status_inbox: novoStatus,
-      })
-      .eq('id', conversa.id)
+    await marcarComoVista(supabase, [conversa.id])
 
     onRefresh?.()
     return {
       ...conversa,
-      status_inbox: novoStatus,
-      aberta_em: new Date().toISOString(),
+      precisa_responder: false,
+      oculta_por_responder: true,
+      vista_em: new Date().toISOString(),
     }
   }
 
@@ -375,21 +353,12 @@ export function InboxList({ conversas, filtro, onRefresh }: InboxListProps) {
   }
 
   async function handleOpenVinted(conversa: Conversa) {
-    const supabase = createClient()
-    const novoStatus =
-      conversa.status_inbox === 'por_responder'
-        ? statusAposVista(conversa.iniciada_por)
-        : conversa.status_inbox
+    if (conversa.precisa_responder) {
+      const supabase = createClient()
+      await marcarComoVista(supabase, [conversa.id])
+      onRefresh?.()
+    }
 
-    await supabase
-      .from('conversas')
-      .update({
-        aberta_em: new Date().toISOString(),
-        status_inbox: novoStatus,
-      })
-      .eq('id_vinted', conversa.id_vinted)
-
-    onRefresh?.()
     setThread(null)
     if (conversa.url_conversa) {
       window.open(conversa.url_conversa, '_blank', 'noopener,noreferrer')

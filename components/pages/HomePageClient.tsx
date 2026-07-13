@@ -9,19 +9,7 @@ import type { Artigo, InboxCounts } from '@/lib/types'
 import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
 import { calcularMetricas, calcularMetricasVinted, formatEuro } from '@/lib/utils'
 
-async function getInboxCounts(supabase: ReturnType<typeof createClient>): Promise<InboxCounts> {
-  const { data } = await supabase.from('conversas').select('status_inbox').neq('status_inbox', 'arquivada')
-  const counts: InboxCounts = {
-    por_responder: 0,
-    proposta_recebida: 0,
-    proposta_enviada: 0,
-  }
-  for (const row of data ?? []) {
-    const key = row.status_inbox as keyof InboxCounts
-    if (key in counts) counts[key]++
-  }
-  return counts
-}
+import { getInboxCounts } from '@/lib/inbox-queries'
 
 export default function HomePageClient() {
   const [artigos, setArtigos] = useState<Artigo[]>([])

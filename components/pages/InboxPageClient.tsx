@@ -6,32 +6,12 @@ import AppShell from '@/components/layout/AppShell'
 import AutoRefresh from '@/components/layout/AutoRefresh'
 import InboxFilters, { InboxList, LiveIndicator } from '@/components/inbox/InboxPanel'
 import { createClient } from '@/lib/supabase/client'
+import { getInboxCounts, loadConversasPorFiltro } from '@/lib/inbox-queries'
 import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
 import type { Conversa, InboxCounts, StatusInbox } from '@/lib/types'
 import { ordenarConversas } from '@/lib/utils'
 
 const VALID_FILTERS: StatusInbox[] = ['por_responder', 'proposta_recebida', 'proposta_enviada']
-
-async function getInboxCounts(supabase: ReturnType<typeof createClient>): Promise<InboxCounts> {
-  const { data } = await supabase
-    .from('conversas')
-    .select('status_inbox')
-    .neq('status_inbox', 'arquivada')
-    .eq('suprimida', false)
-
-  const counts: InboxCounts = {
-    por_responder: 0,
-    proposta_recebida: 0,
-    proposta_enviada: 0,
-  }
-
-  for (const row of data ?? []) {
-    const key = row.status_inbox as keyof InboxCounts
-    if (key in counts) counts[key]++
-  }
-
-  return counts
-}
 
 function InboxContent() {
   const searchParams = useSearchParams()
@@ -51,23 +31,18 @@ function InboxContent() {
 
   const load = useCallback(async () => {
     const supabase = createClient()
-    const [conversasResult, newCounts] = await Promise.all([
-      supabase
-        .from('conversas')
-        .select('*')
-        .eq('status_inbox', filtro)
-        .eq('suprimida', false)
-        .order('data_atualizacao', { ascending: false }),
-      getInboxCounts(supabase),
-    ])
+    try {
+      const [rows, newCounts] = await Promise.all([
+        loadConversasPorFiltro(supabase, filtro),
+        getInboxCounts(supabase),
+      ])
 
-    setConversas(ordenarConversas((conversasResult.data ?? []) as Conversa[]) as Conversa[])
-    setCounts(newCounts)
-    setError(
-      conversasResult.error
-        ? 'Não foi possível carregar conversas. Executa o SQL no Supabase.'
-        : null
-    )
+      setConversas(ordenarConversas(rows) as Conversa[])
+      setCounts(newCounts)
+      setError(null)
+    } catch {
+      setError('Executa supabase/sync-rpc.sql no Supabase para actualizar a base de dados.')
+    }
     setLoading(false)
   }, [filtro])
 
@@ -94,7 +69,7 @@ function InboxContent() {
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Mensagens & Negociações</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Atualiza em tempo real quando a extensão sincroniza a Vinted
+              Sync automático em segundo plano — actualiza a cada 5 segundos
             </p>
           </div>
           <LiveIndicator status={liveStatus} />

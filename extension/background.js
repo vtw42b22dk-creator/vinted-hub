@@ -4,7 +4,7 @@ import { getSyncSecret, saveSyncState, syncToSupabase } from './sync.js'
 let syncTick = 0
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v1.0 instalada')
+  console.log('Vinted Hub Sync v1.1 instalada')
   chrome.storage.local.set({ autoSyncEnabled: true })
 })
 
@@ -40,7 +40,7 @@ async function handleSync(explicitTabId, manual) {
 
   const tab = await getVintedTab(explicitTabId)
   syncTick += 1
-  const fullSync = manual || syncTick % 5 === 0
+  const fullSync = manual || syncTick % 8 === 0
   const data = await extractFromTab(tab.id, fullSync)
 
   if (!data.conversas?.length && !data.artigos?.length) {

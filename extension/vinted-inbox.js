@@ -1,4 +1,4 @@
-// Classificação de conversas Vinted — sinais da API + mensagens
+// Classificação de conversas Vinted — regras do dashboard
 
 export function detectUnread(raw) {
   return Boolean(
@@ -46,18 +46,16 @@ export function extractOfferSenderId(raw) {
     transaction.pending_offer ||
     raw.offer ||
     {}
-
-  return offer.sender_id ?? offer.user_id ?? offer.buyer_id ?? offer.seller_id ?? null
+  return offer.sender_id ?? offer.user_id ?? null
 }
 
 const ENVIADA_PATTERNS = [
-  /enviaste (uma )?(proposta|oferta)/i,
-  /you sent (an )?offer/i,
+  /enviaste (uma )?(proposta|oferta|mensagem)/i,
+  /you sent (an )?(offer|message)/i,
   /fizeste uma proposta/i,
-  /a tua proposta/i,
-  /your offer/i,
   /proposta enviada/i,
   /oferta enviada/i,
+  /mensagem enviada/i,
 ]
 
 const RECEBIDA_PATTERNS = [
@@ -65,9 +63,6 @@ const RECEBIDA_PATTERNS = [
   /fez uma proposta de/i,
   /made (you )?an offer/i,
   /nova proposta/i,
-  /new offer/i,
-  /proposta de \d/i,
-  /oferta de \d/i,
   /recebeste uma proposta/i,
 ]
 
@@ -83,11 +78,7 @@ export function inferPropostaPor(raw, userId, desc) {
   if (offerSender != null) {
     return String(offerSender) === String(userId) ? 'vendedor' : 'comprador'
   }
-
-  const fromText = inferPropostaPorFromText(desc)
-  if (fromText) return fromText
-
-  return null
+  return inferPropostaPorFromText(desc)
 }
 
 export function inferUltimaDe(raw, userId, desc) {
@@ -95,11 +86,9 @@ export function inferUltimaDe(raw, userId, desc) {
   if (lastUserId != null) {
     return String(lastUserId) === String(userId) ? 'vendedor' : 'comprador'
   }
-
   const fromText = inferPropostaPorFromText(desc)
   if (fromText === 'vendedor') return 'vendedor'
   if (fromText === 'comprador') return 'comprador'
-
   return null
 }
 
@@ -117,20 +106,27 @@ export function inferIniciadaPor(raw, userId, desc) {
     return String(starterId) === String(userId) ? 'vendedor' : 'comprador'
   }
 
-  return null
+  const ultimaDe = inferUltimaDe(raw, userId, desc)
+  if (ultimaDe === 'vendedor') return 'vendedor'
+
+  return 'comprador'
 }
 
-export function needsReply(raw, userId, desc, unread) {
-  if (unread) return true
-  const ultimaDe = inferUltimaDe(raw, userId, desc)
-  if (ultimaDe === 'comprador') return true
-
-  // Preview típico de mensagem nova do comprador
-  if (/nova mensagem|new message|mensagem de @|wants to know|perguntou/i.test(desc)) return true
-
+export function isProposta(raw, userId, desc) {
+  const transaction = raw.transaction || {}
+  if (transaction.offer || raw.offer) return true
+  if (/\d+[,.]?\d*\s*€/.test(desc) && /proposta|oferta|offer/i.test(desc)) return true
+  if (inferPropostaPorFromText(desc)) return true
+  if (inferPropostaPor(raw, userId, desc)) return true
   return false
 }
 
+/**
+ * Regras:
+ * - Por responder: não vista + comprador falou por último (ou tu iniciaste mas comprador respondeu)
+ * - Propostas enviadas: tu iniciaste (primeira msg/proposta) — vai direto, não fica em por responder
+ * - Propostas recebidas: proposta do comprador (aparece também em por responder se não vista)
+ */
 export function classifyFromInboxMeta(raw, userId) {
   const desc = extractDescription(raw)
   const unread = detectUnread(raw)
@@ -138,20 +134,26 @@ export function classifyFromInboxMeta(raw, userId) {
   const itemClosed =
     transaction.status === 'completed' || transaction.status === 'cancelled'
 
-  const iniciada_por = inferIniciadaPor(raw, userId, desc) || 'comprador'
-  const ultima_mensagem_de = inferUltimaDe(raw, userId, desc) || (unread ? 'comprador' : 'vendedor')
-  const precisa_responder = needsReply(raw, userId, desc, unread)
+  const iniciada_por = inferIniciadaPor(raw, userId, desc)
+  const ultima_mensagem_de = inferUltimaDe(raw, userId, desc) || 'comprador'
+  const eh_proposta = isProposta(raw, userId, desc)
+
+  let precisa_responder = false
+
+  if (!itemClosed && unread && ultima_mensagem_de === 'comprador') {
+    precisa_responder = true
+  }
+
+  // Tu iniciaste e ainda estás à espera → só propostas enviadas, não por responder
+  if (iniciada_por === 'vendedor' && ultima_mensagem_de === 'vendedor') {
+    precisa_responder = false
+  }
 
   let status_inbox = 'proposta_recebida'
-  if (itemClosed) {
-    status_inbox = 'arquivada'
-  } else if (precisa_responder) {
-    status_inbox = 'por_responder'
-  } else if (iniciada_por === 'vendedor') {
-    status_inbox = 'proposta_enviada'
-  } else {
-    status_inbox = 'proposta_recebida'
-  }
+  if (itemClosed) status_inbox = 'arquivada'
+  else if (precisa_responder) status_inbox = 'por_responder'
+  else if (iniciada_por === 'vendedor') status_inbox = 'proposta_enviada'
+  else status_inbox = 'proposta_recebida'
 
   return {
     desc,
@@ -160,77 +162,56 @@ export function classifyFromInboxMeta(raw, userId) {
     iniciada_por,
     ultima_mensagem_de,
     precisa_responder,
+    eh_proposta,
     status_inbox,
-    proposta_por: inferPropostaPor(raw, userId, desc),
   }
 }
 
-export function isOfferEntity(entityType) {
-  const t = String(entityType || '').toLowerCase()
-  return t.includes('offer') || t.includes('proposta') || t.includes('price_suggestion')
-}
-
-export function inferPropostaPorFromMessages(mensagens, userId) {
+export function inferPropostaPorFromMessages(mensagens, userId, previewIniciada) {
   for (const m of mensagens) {
-    const entity = m._entity || {}
-    const entityType = m._entityType || ''
-    if (!isOfferEntity(entityType)) continue
-
-    const senderId =
-      entity.user_id ??
-      entity.sender_id ??
-      entity.offer?.sender_id ??
-      entity.offer_request?.user_id ??
-      m.de === 'vendedor'
-        ? userId
-        : null
-
-    if (senderId != null) {
-      return String(senderId) === String(userId) ? 'vendedor' : 'comprador'
+    if (m.tipo === 'oferta') {
+      return m.de === 'vendedor' ? 'vendedor' : 'comprador'
     }
-    if (m.de === 'vendedor') return 'vendedor'
-    if (m.de === 'comprador') return 'comprador'
   }
-
-  const firstReal = mensagens.find((m) => m.tipo !== 'sistema' && m.de !== 'sistema')
-  if (firstReal) {
-    return firstReal.de === 'vendedor' ? 'vendedor' : 'comprador'
-  }
-
-  return null
+  const first = mensagens.find((m) => m.tipo !== 'sistema' && m.de !== 'sistema')
+  if (first) return first.de === 'vendedor' ? 'vendedor' : 'comprador'
+  return previewIniciada
 }
 
 export function refineClassification(conversa, raw, userId) {
   const meta = classifyFromInboxMeta(raw, userId)
-  const fromMessages = inferPropostaPorFromMessages(conversa.mensagens || [], userId)
-
-  // Texto/preview da inbox e ofertas têm prioridade sobre histórico incompleto
-  const iniciada_por = meta.proposta_por || fromMessages || meta.iniciada_por
-
-  let status_inbox = meta.status_inbox
-  let ultima_mensagem_de = meta.ultima_mensagem_de
+  const fromMessages = inferPropostaPorFromMessages(conversa.mensagens || [], userId, meta.iniciada_por)
+  const iniciada_por = fromMessages || meta.iniciada_por
 
   const lastMsg = (conversa.mensagens || []).filter((m) => m.tipo !== 'sistema').slice(-1)[0]
-  if (lastMsg) {
-    ultima_mensagem_de = lastMsg.de === 'vendedor' ? 'vendedor' : 'comprador'
-    if (!meta.unread && ultima_mensagem_de === 'comprador' && !meta.itemClosed) {
-      status_inbox = 'por_responder'
-    }
+  let ultima_mensagem_de = meta.ultima_mensagem_de
+  if (lastMsg) ultima_mensagem_de = lastMsg.de === 'vendedor' ? 'vendedor' : 'comprador'
+
+  let precisa_responder = meta.precisa_responder
+  if (!meta.itemClosed && meta.unread && ultima_mensagem_de === 'comprador') {
+    precisa_responder = true
+  }
+  if (iniciada_por === 'vendedor' && ultima_mensagem_de === 'vendedor') {
+    precisa_responder = false
   }
 
-  if (meta.precisa_responder && !meta.itemClosed) {
-    status_inbox = 'por_responder'
-  } else if (!meta.precisa_responder && status_inbox === 'por_responder') {
-    status_inbox = iniciada_por === 'vendedor' ? 'proposta_enviada' : 'proposta_recebida'
-  } else if (status_inbox !== 'arquivada' && status_inbox !== 'por_responder') {
-    status_inbox = iniciada_por === 'vendedor' ? 'proposta_enviada' : 'proposta_recebida'
-  }
+  let status_inbox = meta.status_inbox
+  if (meta.itemClosed) status_inbox = 'arquivada'
+  else if (precisa_responder) status_inbox = 'por_responder'
+  else if (iniciada_por === 'vendedor') status_inbox = 'proposta_enviada'
+  else status_inbox = 'proposta_recebida'
 
   return {
     iniciada_por,
     ultima_mensagem_de,
     status_inbox,
     vinted_unread: meta.unread,
-    precisa_responder: meta.precisa_responder || status_inbox === 'por_responder',
+    precisa_responder,
+    eh_proposta: meta.eh_proposta,
   }
+}
+
+export function isOfferEntity(entityType) {
+  const t = String(entityType || '').toLowerCase()
+  return t.includes('offer') || t.includes('proposta') || t.includes('price_suggestion')
 }
