@@ -1,6 +1,6 @@
 // Classificação de conversas Vinted — regras do dashboard
 
-export function detectUnread(raw) {
+function detectUnread(raw) {
   return Boolean(
     raw.unread ||
       raw.is_unread ||
@@ -10,7 +10,7 @@ export function detectUnread(raw) {
   )
 }
 
-export function extractDescription(raw) {
+function extractDescription(raw) {
   const lm = raw.last_message || raw.latest_message || raw.last_message_preview || {}
   return String(
     raw.description ||
@@ -23,7 +23,7 @@ export function extractDescription(raw) {
   ).trim()
 }
 
-export function extractLastMessageUserId(raw) {
+function extractLastMessageUserId(raw) {
   const lm = raw.last_message || raw.latest_message || raw.last_message_preview || {}
   const entity = lm.entity || lm
   return (
@@ -38,7 +38,7 @@ export function extractLastMessageUserId(raw) {
   )
 }
 
-export function extractOfferSenderId(raw) {
+function extractOfferSenderId(raw) {
   const transaction = raw.transaction || raw.active_transaction || {}
   const offer =
     transaction.offer ||
@@ -66,14 +66,14 @@ const RECEBIDA_PATTERNS = [
   /recebeste uma proposta/i,
 ]
 
-export function inferPropostaPorFromText(texto) {
+function inferPropostaPorFromText(texto) {
   const t = String(texto || '')
   if (ENVIADA_PATTERNS.some((re) => re.test(t))) return 'vendedor'
   if (RECEBIDA_PATTERNS.some((re) => re.test(t))) return 'comprador'
   return null
 }
 
-export function inferPropostaPor(raw, userId, desc) {
+function inferPropostaPor(raw, userId, desc) {
   const offerSender = extractOfferSenderId(raw)
   if (offerSender != null) {
     return String(offerSender) === String(userId) ? 'vendedor' : 'comprador'
@@ -81,7 +81,7 @@ export function inferPropostaPor(raw, userId, desc) {
   return inferPropostaPorFromText(desc)
 }
 
-export function inferUltimaDe(raw, userId, desc) {
+function inferUltimaDe(raw, userId, desc) {
   const lastUserId = extractLastMessageUserId(raw)
   if (lastUserId != null) {
     return String(lastUserId) === String(userId) ? 'vendedor' : 'comprador'
@@ -92,7 +92,7 @@ export function inferUltimaDe(raw, userId, desc) {
   return null
 }
 
-export function inferIniciadaPor(raw, userId, desc) {
+function inferIniciadaPor(raw, userId, desc) {
   const propostaPor = inferPropostaPor(raw, userId, desc)
   if (propostaPor) return propostaPor
 
@@ -112,7 +112,7 @@ export function inferIniciadaPor(raw, userId, desc) {
   return 'comprador'
 }
 
-export function isProposta(raw, userId, desc) {
+function isProposta(raw, userId, desc) {
   const transaction = raw.transaction || {}
   if (transaction.offer || raw.offer) return true
   if (/\d+[,.]?\d*\s*€/.test(desc) && /proposta|oferta|offer/i.test(desc)) return true
@@ -127,7 +127,7 @@ export function isProposta(raw, userId, desc) {
  * - Propostas enviadas: tu iniciaste (primeira msg/proposta) — vai direto, não fica em por responder
  * - Propostas recebidas: proposta do comprador (aparece também em por responder se não vista)
  */
-export function classifyFromInboxMeta(raw, userId) {
+function classifyFromInboxMeta(raw, userId) {
   const desc = extractDescription(raw)
   const unread = detectUnread(raw)
   const transaction = raw.transaction || {}
@@ -167,7 +167,7 @@ export function classifyFromInboxMeta(raw, userId) {
   }
 }
 
-export function inferPropostaPorFromMessages(mensagens, userId, previewIniciada) {
+function inferPropostaPorFromMessages(mensagens, userId, previewIniciada) {
   for (const m of mensagens) {
     if (m.tipo === 'oferta') {
       return m.de === 'vendedor' ? 'vendedor' : 'comprador'
@@ -178,7 +178,7 @@ export function inferPropostaPorFromMessages(mensagens, userId, previewIniciada)
   return previewIniciada
 }
 
-export function refineClassification(conversa, raw, userId) {
+function refineClassification(conversa, raw, userId) {
   const meta = classifyFromInboxMeta(raw, userId)
   const fromMessages = inferPropostaPorFromMessages(conversa.mensagens || [], userId, meta.iniciada_por)
   const iniciada_por = fromMessages || meta.iniciada_por
@@ -211,7 +211,7 @@ export function refineClassification(conversa, raw, userId) {
   }
 }
 
-export function isOfferEntity(entityType) {
+function isOfferEntity(entityType) {
   const t = String(entityType || '').toLowerCase()
   return t.includes('offer') || t.includes('proposta') || t.includes('price_suggestion')
 }

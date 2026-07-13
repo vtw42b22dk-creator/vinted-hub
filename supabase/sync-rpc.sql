@@ -14,6 +14,33 @@ CREATE INDEX IF NOT EXISTS idx_conversas_suprimida ON public.conversas (user_id,
 CREATE INDEX IF NOT EXISTS idx_conversas_por_responder ON public.conversas (user_id, precisa_responder, oculta_por_responder);
 CREATE INDEX IF NOT EXISTS idx_conversas_iniciada ON public.conversas (user_id, iniciada_por, eh_proposta);
 
+-- Backfill de dados antigos para as novas colunas (idempotente)
+UPDATE public.conversas
+SET iniciada_por = CASE
+  WHEN status_inbox = 'proposta_enviada' THEN 'vendedor'
+  ELSE 'comprador'
+END
+WHERE iniciada_por IS NULL;
+
+UPDATE public.conversas
+SET precisa_responder = true
+WHERE status_inbox = 'por_responder'
+  AND NOT suprimida
+  AND NOT oculta_por_responder
+  AND NOT precisa_responder;
+
+UPDATE public.conversas
+SET eh_proposta = true
+WHERE valor_proposta IS NOT NULL
+  AND NOT eh_proposta;
+
+UPDATE public.conversas
+SET status_inbox = CASE
+  WHEN iniciada_por = 'vendedor' THEN 'proposta_enviada'::status_inbox
+  ELSE 'proposta_recebida'::status_inbox
+END
+WHERE status_inbox = 'em_negociacao';
+
 CREATE OR REPLACE FUNCTION public.sync_from_vinted(
   p_sync_secret text,
   p_artigos jsonb DEFAULT '[]'::jsonb,

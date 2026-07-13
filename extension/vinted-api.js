@@ -433,7 +433,7 @@ async function enrichConversasWithMessages(conversas, userId) {
     .filter((c) => c.precisa_responder && c.vinted_unread)
     .slice(0, MESSAGE_FETCH_BATCH_UNREAD)
 
-  const toEnrichIds = new Set(toEnrich.map((c) => c.id_vinted))
+  const finalized = new Map()
 
   await runPool(toEnrich, async (conversa) => {
     try {
@@ -441,10 +441,10 @@ async function enrichConversasWithMessages(conversas, userId) {
     } catch {
       conversa.mensagens = []
     }
-    return finalizeConversation(conversa)
+    finalized.set(conversa.id_vinted, finalizeConversation(conversa))
   })
 
-  return withMeta.map((c) => (toEnrichIds.has(c.id_vinted) ? c : finalizeConversation(c)))
+  return withMeta.map((c) => finalized.get(c.id_vinted) || finalizeConversation(c))
 }
 
 async function syncInboxFast() {

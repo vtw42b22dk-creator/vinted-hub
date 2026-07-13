@@ -4,7 +4,7 @@ import { getSyncSecret, saveSyncState, syncToSupabase } from './sync.js'
 let syncTick = 0
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v1.1 instalada')
+  console.log('Vinted Hub Sync v1.2 instalada')
   chrome.storage.local.set({ autoSyncEnabled: true })
 })
 
