@@ -1,16 +1,21 @@
 import { SYNC_INTERVAL_MS } from './config.js'
-import { getSyncSecret, saveSyncState, syncToSupabase } from './sync.js'
-
-let syncTick = 0
+import { addConversaToSupabase, getSyncSecret, saveSyncState, syncToSupabase } from './sync.js'
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v1.2 instalada')
+  console.log('Vinted Hub Sync v2.0 instalada')
   chrome.storage.local.set({ autoSyncEnabled: true })
 })
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'syncFromPage') {
-    handleSync(message.tabId, message.manual === true)
+    handleSync(message.tabId ?? sender.tab?.id, message.manual === true)
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }))
+    return true
+  }
+
+  if (message.action === 'addConversa') {
+    handleAddConversa(message.conversa)
       .then((result) => sendResponse(result))
       .catch((err) => sendResponse({ ok: false, error: err.message }))
     return true
@@ -30,6 +35,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 })
 
+async function handleAddConversa(conversa) {
+  const syncSecret = await getSyncSecret()
+  if (!syncSecret) {
+    throw new Error('Abre o dashboard → /setup para ligar a extensão.')
+  }
+  if (!conversa?.id_vinted) {
+    throw new Error('Conversa inválida.')
+  }
+  return addConversaToSupabase(conversa, syncSecret)
+}
+
 async function handleSync(explicitTabId, manual) {
   const syncSecret = await getSyncSecret()
   if (!syncSecret) {
@@ -39,11 +55,9 @@ async function handleSync(explicitTabId, manual) {
   }
 
   const tab = await getVintedTab(explicitTabId)
-  syncTick += 1
-  const fullSync = manual || syncTick % 8 === 0
-  const data = await extractFromTab(tab.id, fullSync)
+  const data = await extractFromTab(tab.id)
 
-  if (!data.conversas?.length && !data.artigos?.length) {
+  if (!data.artigos?.length) {
     const err = 'Nada encontrado na Vinted. Confirma login em vinted.pt.'
     if (manual) await saveSyncState({ ok: false, error: err })
     throw new Error(err)
@@ -52,7 +66,7 @@ async function handleSync(explicitTabId, manual) {
   const result = await syncToSupabase(data, syncSecret)
   await saveSyncState({
     ok: true,
-    message: `${fullSync ? 'Completo' : 'Rápido'}: ${result.message}`,
+    message: result.message,
     at: new Date().toISOString(),
   })
 
@@ -74,52 +88,39 @@ async function getVintedTab(explicitTabId) {
   throw new Error('Abre vinted.pt numa tab e faz login primeiro.')
 }
 
-async function injectVintedScripts(tabId) {
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ['vinted-inbox.js', 'vinted-api.js'],
-  })
-}
-
-async function extractFromTab(tabId, fullSync) {
+async function extractFromTab(tabId) {
   try {
-    await injectVintedScripts(tabId)
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['vinted-api.js'],
+    })
   } catch {
     // já injectado
   }
 
-  const method = fullSync ? 'syncAllFromVinted' : 'syncInboxFast'
-
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async (syncMethod) => {
-      if (!window.__vintedHub?.[syncMethod]) {
+    func: async () => {
+      if (!window.__vintedHub?.syncAllFromVinted) {
         throw new Error('Recarrega a Vinted (F5) e tenta outra vez.')
       }
-      return window.__vintedHub[syncMethod]()
+      return window.__vintedHub.syncAllFromVinted()
     },
-    args: [method],
   })
 
   if (injection?.result) return injection.result
   throw new Error('Não foi possível ler a Vinted. Recarrega a página (F5).')
 }
 
-chrome.alarms.create('autoSync', { periodInMinutes: 1 })
+chrome.alarms.create('autoSync', { periodInMinutes: 2 })
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== 'autoSync') return
-  const secret = await getSyncSecret()
-  if (!secret) return
-  const tabs = await chrome.tabs.query({ url: ['*://*.vinted.pt/*', '*://*.vinted.com/*'] })
-  if (!tabs.length) return
-  try {
-    await handleSync(tabs[0].id, false)
-  } catch (err) {
-    await saveSyncState({ ok: false, error: err.message, at: new Date().toISOString() })
-  }
+  await autoSyncTick()
 })
 
-setInterval(async () => {
+setInterval(autoSyncTick, SYNC_INTERVAL_MS)
+
+async function autoSyncTick() {
   const { autoSyncEnabled } = await chrome.storage.local.get(['autoSyncEnabled'])
   if (autoSyncEnabled === false) return
 
@@ -134,4 +135,4 @@ setInterval(async () => {
   } catch (err) {
     await saveSyncState({ ok: false, error: err.message, at: new Date().toISOString() })
   }
-}, SYNC_INTERVAL_MS)
+}

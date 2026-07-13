@@ -1,46 +1,14 @@
--- SYNC AUTOMÁTICO — corre UMA VEZ no Supabase SQL Editor
+-- SYNC + CONVERSAS MANUAIS — corre UMA VEZ no Supabase SQL Editor
 
 ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS suprimida BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS mensagens_json JSONB NOT NULL DEFAULT '[]'::jsonb;
-ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS iniciada_por TEXT;
 ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS fixada_em TIMESTAMPTZ;
-ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS vista_em TIMESTAMPTZ;
-ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS oculta_por_responder BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS precisa_responder BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS vinted_unread BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS eh_proposta BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS notas TEXT;
+ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS adicionada_manual BOOLEAN NOT NULL DEFAULT false;
 
-CREATE INDEX IF NOT EXISTS idx_conversas_suprimida ON public.conversas (user_id, suprimida);
-CREATE INDEX IF NOT EXISTS idx_conversas_por_responder ON public.conversas (user_id, precisa_responder, oculta_por_responder);
-CREATE INDEX IF NOT EXISTS idx_conversas_iniciada ON public.conversas (user_id, iniciada_por, eh_proposta);
+CREATE INDEX IF NOT EXISTS idx_conversas_manual ON public.conversas (user_id, adicionada_manual, suprimida);
 
--- Backfill de dados antigos para as novas colunas (idempotente)
-UPDATE public.conversas
-SET iniciada_por = CASE
-  WHEN status_inbox = 'proposta_enviada' THEN 'vendedor'
-  ELSE 'comprador'
-END
-WHERE iniciada_por IS NULL;
-
-UPDATE public.conversas
-SET precisa_responder = true
-WHERE status_inbox = 'por_responder'
-  AND NOT suprimida
-  AND NOT oculta_por_responder
-  AND NOT precisa_responder;
-
-UPDATE public.conversas
-SET eh_proposta = true
-WHERE valor_proposta IS NOT NULL
-  AND NOT eh_proposta;
-
-UPDATE public.conversas
-SET status_inbox = CASE
-  WHEN iniciada_por = 'vendedor' THEN 'proposta_enviada'::status_inbox
-  ELSE 'proposta_recebida'::status_inbox
-END
-WHERE status_inbox = 'em_negociacao';
-
+-- Sync automático: SÓ artigos (inventário). Conversas são adicionadas manualmente.
 CREATE OR REPLACE FUNCTION public.sync_from_vinted(
   p_sync_secret text,
   p_artigos jsonb DEFAULT '[]'::jsonb,
@@ -54,17 +22,7 @@ AS $$
 DECLARE
   v_user_id uuid;
   v_artigos int := 0;
-  v_conversas int := 0;
   a jsonb;
-  c jsonb;
-  v_existing record;
-  v_status status_inbox;
-  v_unread boolean;
-  v_precisa boolean;
-  v_oculta boolean;
-  v_vista timestamptz;
-  v_nova_atividade timestamptz;
-  v_iniciada text;
 BEGIN
   SELECT id INTO v_user_id FROM public.profiles WHERE sync_secret = p_sync_secret;
   IF v_user_id IS NULL THEN
@@ -92,96 +50,76 @@ BEGIN
     v_artigos := v_artigos + 1;
   END LOOP;
 
-  FOR c IN SELECT value FROM jsonb_array_elements(COALESCE(p_conversas, '[]'::jsonb))
-  LOOP
-    SELECT status_inbox, aberta_em, suprimida, vista_em, oculta_por_responder
-    INTO v_existing
-    FROM public.conversas
-    WHERE user_id = v_user_id AND id_vinted = c->>'id_vinted';
+  RETURN jsonb_build_object('ok', true, 'artigos', v_artigos, 'conversas', 0);
+END;
+$$;
 
-    IF FOUND AND v_existing.suprimida THEN
-      CONTINUE;
-    END IF;
+-- Adicionar (ou atualizar) UMA conversa manualmente a partir do botão na Vinted.
+-- Preserva notas e fixada_em; reativa se estava removida.
+CREATE OR REPLACE FUNCTION public.add_conversa_manual(
+  p_sync_secret text,
+  p_conversa jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user_id uuid;
+  c jsonb := p_conversa;
+BEGIN
+  SELECT id INTO v_user_id FROM public.profiles WHERE sync_secret = p_sync_secret;
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Sync secret inválido — copia de /setup no dashboard';
+  END IF;
 
-    v_unread := COALESCE((c->>'vinted_unread')::boolean, false);
-    v_precisa := COALESCE((c->>'precisa_responder')::boolean, false);
-    v_iniciada := NULLIF(c->>'iniciada_por', '');
-    v_nova_atividade := COALESCE((c->>'data_atualizacao')::timestamptz, now());
-    v_vista := v_existing.vista_em;
-    v_oculta := COALESCE(v_existing.oculta_por_responder, false);
+  IF c IS NULL OR c->>'id_vinted' IS NULL THEN
+    RAISE EXCEPTION 'Conversa inválida';
+  END IF;
 
-    -- Marcada como vista / eliminada do por responder: só volta se actividade nova
-    IF v_oculta THEN
-      IF v_vista IS NOT NULL AND v_nova_atividade > v_vista AND v_precisa THEN
-        v_oculta := false;
-      ELSE
-        v_precisa := false;
-        v_unread := false;
-      END IF;
-    END IF;
+  INSERT INTO public.conversas (
+    user_id, id_vinted, user_comprador, avatar_comprador, ultimo_texto,
+    ultima_mensagem_de, status_inbox, status_negocio, valor_proposta,
+    id_artigo_vinted, url_conversa, item_fechado,
+    suprimida, adicionada_manual, mensagens_json, data_atualizacao
+  ) VALUES (
+    v_user_id, c->>'id_vinted', COALESCE(c->>'user_comprador', 'desconhecido'),
+    NULLIF(c->>'avatar_comprador', ''), NULLIF(c->>'ultimo_texto', ''),
+    CASE WHEN c->>'ultima_mensagem_de' = 'vendedor' THEN 'vendedor' ELSE 'comprador' END,
+    'proposta_recebida'::status_inbox,
+    CASE WHEN COALESCE(c->>'status_negocio', 'sem_proposta') IN ('sem_proposta','proposta_pendente','aceite','recusada','expirada')
+      THEN COALESCE(c->>'status_negocio', 'sem_proposta')::status_negocio ELSE 'sem_proposta'::status_negocio END,
+    NULLIF(c->>'valor_proposta', '')::numeric,
+    NULLIF(c->>'id_artigo_vinted', ''), NULLIF(c->>'url_conversa', ''),
+    COALESCE((c->>'item_fechado')::boolean, false),
+    false, true,
+    COALESCE(c->'mensagens', '[]'::jsonb),
+    COALESCE((c->>'data_atualizacao')::timestamptz, now())
+  )
+  ON CONFLICT (user_id, id_vinted) DO UPDATE SET
+    user_comprador = EXCLUDED.user_comprador,
+    avatar_comprador = EXCLUDED.avatar_comprador,
+    ultimo_texto = EXCLUDED.ultimo_texto,
+    ultima_mensagem_de = EXCLUDED.ultima_mensagem_de,
+    status_negocio = EXCLUDED.status_negocio,
+    valor_proposta = EXCLUDED.valor_proposta,
+    id_artigo_vinted = EXCLUDED.id_artigo_vinted,
+    url_conversa = EXCLUDED.url_conversa,
+    item_fechado = EXCLUDED.item_fechado,
+    suprimida = false,
+    adicionada_manual = true,
+    mensagens_json = CASE
+      WHEN jsonb_array_length(EXCLUDED.mensagens_json) > 0 THEN EXCLUDED.mensagens_json
+      ELSE conversas.mensagens_json
+    END,
+    data_atualizacao = EXCLUDED.data_atualizacao;
 
-    v_status := COALESCE(c->>'status_inbox', 'proposta_recebida')::status_inbox;
-
-    IF COALESCE((c->>'item_fechado')::boolean, false) THEN
-      v_status := 'arquivada';
-      v_precisa := false;
-    ELSIF v_precisa THEN
-      v_status := 'por_responder';
-    ELSIF v_iniciada = 'vendedor' THEN
-      v_status := 'proposta_enviada';
-    ELSE
-      v_status := 'proposta_recebida';
-    END IF;
-
-    INSERT INTO public.conversas (
-      user_id, id_vinted, user_comprador, avatar_comprador, ultimo_texto,
-      ultima_mensagem_de, status_inbox, status_negocio, valor_proposta,
-      id_artigo_vinted, url_conversa, item_fechado, suprimida, iniciada_por,
-      precisa_responder, vinted_unread, eh_proposta, oculta_por_responder,
-      mensagens_json, data_atualizacao
-    ) VALUES (
-      v_user_id, c->>'id_vinted', COALESCE(c->>'user_comprador', 'desconhecido'),
-      NULLIF(c->>'avatar_comprador', ''), NULLIF(c->>'ultimo_texto', ''),
-      CASE WHEN c->>'ultima_mensagem_de' = 'vendedor' THEN 'vendedor' ELSE 'comprador' END,
-      v_status,
-      CASE WHEN COALESCE(c->>'status_negocio', 'sem_proposta') IN ('sem_proposta','proposta_pendente','aceite','recusada','expirada')
-        THEN COALESCE(c->>'status_negocio', 'sem_proposta')::status_negocio ELSE 'sem_proposta'::status_negocio END,
-      NULLIF(c->>'valor_proposta', '')::numeric,
-      NULLIF(c->>'id_artigo_vinted', ''), NULLIF(c->>'url_conversa', ''),
-      COALESCE((c->>'item_fechado')::boolean, false), false,
-      v_iniciada,
-      v_precisa, v_unread, COALESCE((c->>'eh_proposta')::boolean, false), v_oculta,
-      COALESCE(c->'mensagens', '[]'::jsonb), v_nova_atividade
-    )
-    ON CONFLICT (user_id, id_vinted) DO UPDATE SET
-      user_comprador = EXCLUDED.user_comprador,
-      avatar_comprador = EXCLUDED.avatar_comprador,
-      ultimo_texto = EXCLUDED.ultimo_texto,
-      ultima_mensagem_de = EXCLUDED.ultima_mensagem_de,
-      status_inbox = CASE WHEN conversas.suprimida THEN conversas.status_inbox ELSE EXCLUDED.status_inbox END,
-      status_negocio = EXCLUDED.status_negocio,
-      valor_proposta = EXCLUDED.valor_proposta,
-      id_artigo_vinted = EXCLUDED.id_artigo_vinted,
-      url_conversa = EXCLUDED.url_conversa,
-      item_fechado = EXCLUDED.item_fechado,
-      iniciada_por = COALESCE(EXCLUDED.iniciada_por, conversas.iniciada_por),
-      precisa_responder = EXCLUDED.precisa_responder,
-      vinted_unread = EXCLUDED.vinted_unread,
-      eh_proposta = EXCLUDED.eh_proposta,
-      oculta_por_responder = EXCLUDED.oculta_por_responder,
-      mensagens_json = CASE
-        WHEN jsonb_array_length(EXCLUDED.mensagens_json) > 0 THEN EXCLUDED.mensagens_json
-        ELSE conversas.mensagens_json
-      END,
-      data_atualizacao = EXCLUDED.data_atualizacao
-    WHERE NOT conversas.suprimida;
-
-    v_conversas := v_conversas + 1;
-  END LOOP;
-
-  RETURN jsonb_build_object('ok', true, 'artigos', v_artigos, 'conversas', v_conversas);
+  RETURN jsonb_build_object('ok', true);
 END;
 $$;
 
 REVOKE ALL ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb) TO anon, authenticated;
+REVOKE ALL ON FUNCTION public.add_conversa_manual(text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.add_conversa_manual(text, jsonb) TO anon, authenticated;

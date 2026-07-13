@@ -13,11 +13,7 @@ import { getInboxCounts } from '@/lib/inbox-queries'
 
 export default function HomePageClient() {
   const [artigos, setArtigos] = useState<Artigo[]>([])
-  const [inboxCounts, setInboxCounts] = useState<InboxCounts>({
-    por_responder: 0,
-    proposta_recebida: 0,
-    proposta_enviada: 0,
-  })
+  const [inboxCounts, setInboxCounts] = useState<InboxCounts>({ total: 0 })
   const [vintedMetrics, setVintedMetrics] = useState(calcularMetricasVinted([]))
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -49,10 +45,6 @@ export default function HomePageClient() {
   useSupabaseRealtime(load, ['conversas', 'artigos_vinted', 'artigos'])
 
   const metrics = calcularMetricas(artigos)
-  const totalInbox =
-    inboxCounts.por_responder +
-    inboxCounts.proposta_recebida +
-    inboxCounts.proposta_enviada
 
   if (loading) {
     return (
@@ -74,12 +66,12 @@ export default function HomePageClient() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Link
-            href="/inbox?filtro=por_responder"
+            href="/inbox"
             className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
           >
-            <p className="text-sm font-medium text-slate-500">Mensagens pendentes</p>
-            <p className="mt-1 text-3xl font-bold text-slate-900">{inboxCounts.por_responder}</p>
-            <p className="mt-2 text-xs text-sky-600">{totalInbox} conversas no total →</p>
+            <p className="text-sm font-medium text-slate-500">Conversas guardadas</p>
+            <p className="mt-1 text-3xl font-bold text-slate-900">{inboxCounts.total}</p>
+            <p className="mt-2 text-xs text-sky-600">Ver mensagens e apontamentos →</p>
           </Link>
           <Link
             href="/inventario"

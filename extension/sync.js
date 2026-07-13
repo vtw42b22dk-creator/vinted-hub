@@ -49,6 +49,41 @@ export async function syncToSupabase(data, syncSecret) {
   }
 }
 
+export async function addConversaToSupabase(conversa, syncSecret) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/add_conversa_manual`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({
+      p_sync_secret: syncSecret,
+      p_conversa: conversa,
+    }),
+  })
+
+  let json = {}
+  try {
+    json = await res.json()
+  } catch {
+    json = {}
+  }
+
+  if (!res.ok) {
+    const msg =
+      json.message ||
+      json.error ||
+      json.hint ||
+      (res.status === 404
+        ? 'Corre supabase/sync-rpc.sql no Supabase'
+        : `Erro ${res.status}`)
+    throw new Error(msg)
+  }
+
+  return { ok: true }
+}
+
 export async function saveSyncState(state) {
   await chrome.storage.local.set({
     lastSyncAt: state.at || new Date().toISOString(),

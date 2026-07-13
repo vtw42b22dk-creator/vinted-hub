@@ -2,7 +2,6 @@ import type {
   ArtigoVinted,
   StatusArtigo,
   StatusArtigoVinted,
-  StatusInbox,
 } from '@/lib/types'
 
 export function formatEuro(value: number): string {
@@ -25,12 +24,6 @@ export function formatRelativeTime(dateString: string): string {
   if (diffD < 7) return `há ${diffD}d`
   return date.toLocaleDateString('pt-PT', { day: 'numeric', month: 'short' })
 }
-
-export const INBOX_FILTERS: { key: StatusInbox; label: string }[] = [
-  { key: 'por_responder', label: 'Por Responder' },
-  { key: 'proposta_recebida', label: 'Propostas Recebidas' },
-  { key: 'proposta_enviada', label: 'Propostas Enviadas' },
-]
 
 export function ordenarConversas(conversas: { fixada_em?: string | null; data_atualizacao: string }[]) {
   return [...conversas].sort((a, b) => {
@@ -94,12 +87,6 @@ export function statusVintedBadgeClasses(status: StatusArtigoVinted): string {
     default:
       return `${base} bg-gray-100 text-gray-700`
   }
-}
-
-export function inboxFilterClasses(active: boolean): string {
-  return active
-    ? 'rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm'
-    : 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50'
 }
 
 export function calcularMetricas(

@@ -12,7 +12,7 @@ interface ConversaThreadModalProps {
 function getMensagens(conversa: Conversa): MensagemConversa[] {
   const stored = conversa.mensagens_json
   if (Array.isArray(stored) && stored.length > 0) {
-    return stored.slice(-8)
+    return stored.slice(-30)
   }
 
   if (conversa.ultimo_texto) {
@@ -68,9 +68,9 @@ export default function ConversaThreadModal({
 
           {mensagens.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
-              <p className="text-sm text-slate-600">Ainda sem mensagens sincronizadas.</p>
+              <p className="text-sm text-slate-600">Sem mensagens guardadas.</p>
               <p className="mt-1 text-xs text-slate-500">
-                Mantém a Vinted aberta — a extensão vai buscar as últimas 5 mensagens no próximo sync.
+                Volta a clicar em ＋ Dashboard na Vinted para atualizar as mensagens desta conversa.
               </p>
             </div>
           ) : (

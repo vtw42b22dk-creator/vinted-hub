@@ -81,13 +81,15 @@ export interface Conversa {
   iniciada_por?: IniciadaPor | null
   fixada_em?: string | null
   mensagens_json?: MensagemConversa[]
+  notas?: string | null
+  adicionada_manual?: boolean
 }
 
 export interface MensagemConversa {
   texto: string
   de: 'comprador' | 'vendedor' | 'sistema'
   data?: string | null
-  tipo?: 'mensagem' | 'sistema'
+  tipo?: 'mensagem' | 'sistema' | 'oferta'
 }
 
 export interface ArtigoVinted {
@@ -116,9 +118,7 @@ export interface InventarioMetrics {
 }
 
 export interface InboxCounts {
-  por_responder: number
-  proposta_recebida: number
-  proposta_enviada: number
+  total: number
 }
 
 export interface OverviewMetrics {
