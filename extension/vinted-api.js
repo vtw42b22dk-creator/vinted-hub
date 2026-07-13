@@ -1,7 +1,8 @@
 // Cliente da API interna Vinted (usa cookies da sessão do browser)
+// Depende de vinted-inbox.js (carregado antes no manifest)
 
-const MESSAGE_FETCH_CONCURRENCY = 4
-const MESSAGE_FETCH_BATCH = 40
+const MESSAGE_FETCH_CONCURRENCY = 5
+const MESSAGE_FETCH_BATCH_UNREAD = 80
 
 function getCsrfToken() {
   return (
@@ -34,13 +35,33 @@ async function fetchCurrentUser() {
   return data.user || data
 }
 
+function mergeConversation(existing, incoming) {
+  if (!existing) return incoming
+
+  const unread = existing.vinted_unread || incoming.vinted_unread
+  const precisa = existing.precisa_responder || incoming.precisa_responder
+  const existingTs = new Date(existing.data_atualizacao || 0).getTime()
+  const incomingTs = new Date(incoming.data_atualizacao || 0).getTime()
+  const base = incomingTs >= existingTs ? incoming : existing
+
+  return {
+    ...base,
+    vinted_unread: unread,
+    precisa_responder: precisa,
+    status_inbox:
+      unread || precisa
+        ? 'por_responder'
+        : base.status_inbox === 'por_responder'
+          ? incoming.status_inbox
+          : base.status_inbox,
+  }
+}
+
 function dedupeConversations(conversas) {
   const map = new Map()
   for (const c of conversas) {
     const existing = map.get(c.id_vinted)
-    if (!existing || c.vinted_unread || c.data_atualizacao > existing.data_atualizacao) {
-      map.set(c.id_vinted, c)
-    }
+    map.set(c.id_vinted, mergeConversation(existing, c))
   }
   return [...map.values()]
 }
@@ -48,25 +69,31 @@ function dedupeConversations(conversas) {
 async function fetchInboxPage(page, perPage, extraQuery = '') {
   const data = await vintedFetch(`/api/v2/inbox?page=${page}&per_page=${perPage}${extraQuery}`)
   return {
-    conversations: data.conversations || [],
+    conversations: data.conversations || data.inbox_conversations || [],
     totalPages: data.pagination?.total_pages || 1,
   }
 }
 
 async function fetchAllInbox(currentUserId) {
   const perPage = 50
-  const maxPages = 12
+  const maxPages = 15
   const collected = []
 
-  const queries = ['', '&filter=unread', '&unread=1']
+  const queries = [
+    '',
+    '&filter=unread',
+    '&unread=1',
+    '&folder=unread',
+    '&status=unread',
+  ]
 
   for (const extra of queries) {
     try {
       let page = 1
       while (page <= maxPages) {
         const { conversations, totalPages } = await fetchInboxPage(page, perPage, extra)
-        for (const c of conversations) {
-          collected.push(mapConversation(c, currentUserId))
+        for (const raw of conversations) {
+          collected.push(mapConversation(raw, currentUserId))
         }
         if (page >= totalPages || conversations.length === 0) break
         page++
@@ -124,26 +151,12 @@ async function fetchAllUserItems(userId) {
   return artigos
 }
 
-function isItemClosed(c) {
-  const transaction = c.transaction || {}
-  return transaction.status === 'completed' || transaction.status === 'cancelled'
-}
-
-function inferIniciadaFromPreview(texto) {
-  const t = String(texto || '').toLowerCase()
-  if (/enviaste|you sent|mensagem enviada|proposta enviada|oferta enviada/i.test(t)) return 'vendedor'
-  if (/fez uma proposta|sent you|enviou-te|nova mensagem|new message|interess/i.test(t)) return 'comprador'
-  return null
-}
-
-function mapConversation(c, currentUserId) {
-  const desc = c.description || c.subtitle || c.last_message?.body || ''
-  const unread = Boolean(c.unread)
+function mapConversation(raw, currentUserId) {
+  const meta = classifyFromInboxMeta(raw, currentUserId)
   const domain = window.location.origin
-  const transaction = c.transaction || {}
-  const itemClosed = isItemClosed(c)
+  const transaction = raw.transaction || {}
 
-  const offerMatch = desc.match(/(\d+[,.]\d{2}|\d+)\s*€/)
+  const offerMatch = meta.desc.match(/(\d+[,.]\d{2}|\d+)\s*€/)
   const valor_proposta =
     transaction.offer?.price != null
       ? parsePrice(transaction.offer.price)
@@ -152,82 +165,56 @@ function mapConversation(c, currentUserId) {
         : null
 
   const updatedAt =
-    c.updated_at ||
-    c.last_message_at ||
-    c.last_message?.created_at ||
+    raw.updated_at ||
+    raw.last_message_at ||
+    raw.last_message?.created_at ||
     transaction.updated_at ||
     new Date().toISOString()
 
-  const iniciadaPreview = inferIniciadaFromPreview(desc)
-
   return {
-    id_vinted: String(c.id),
-    user_comprador: c.opposite_user?.login || c.member?.login || 'desconhecido',
+    id_vinted: String(raw.id),
+    user_comprador: raw.opposite_user?.login || raw.member?.login || 'desconhecido',
     avatar_comprador:
-      c.opposite_user?.photo?.url ||
-      c.opposite_user?.photo?.full_size_url ||
-      c.member?.photo?.url ||
-      c.item_photos?.[0]?.url ||
+      raw.opposite_user?.photo?.url ||
+      raw.opposite_user?.photo?.full_size_url ||
+      raw.member?.photo?.url ||
+      raw.item_photos?.[0]?.url ||
       null,
-    ultimo_texto: desc,
-    ultima_mensagem_de: unread ? 'comprador' : 'vendedor',
-    status_inbox: itemClosed ? 'arquivada' : unread ? 'por_responder' : 'proposta_recebida',
-    status_negocio: /proposta|oferta|offer/i.test(desc) ? 'proposta_pendente' : 'sem_proposta',
+    ultimo_texto: meta.desc,
+    ultima_mensagem_de: meta.ultima_mensagem_de,
+    status_inbox: meta.status_inbox,
+    status_negocio: /proposta|oferta|offer/i.test(meta.desc) ? 'proposta_pendente' : 'sem_proposta',
     valor_proposta,
-    id_artigo_vinted: c.item_id ? String(c.item_id) : transaction.item_id ? String(transaction.item_id) : null,
-    url_conversa: `${domain}/inbox/${c.id}`,
-    item_fechado: itemClosed,
-    vinted_unread: unread,
-    iniciada_por: iniciadaPreview,
+    id_artigo_vinted: raw.item_id
+      ? String(raw.item_id)
+      : transaction.item_id
+        ? String(transaction.item_id)
+        : null,
+    url_conversa: `${domain}/inbox/${raw.id}`,
+    item_fechado: meta.itemClosed,
+    vinted_unread: meta.unread,
+    precisa_responder: meta.precisa_responder,
+    iniciada_por: meta.iniciada_por,
     data_atualizacao: updatedAt,
     mensagens: [],
-  }
-}
-
-function isMensagemReal(m) {
-  return m.tipo !== 'sistema' && m.de !== 'sistema'
-}
-
-function classifyConversation(c) {
-  if (c.item_fechado) {
-    return { status_inbox: 'arquivada', iniciada_por: c.iniciada_por, ultima_mensagem_de: 'comprador' }
-  }
-
-  const all = c.mensagens || []
-  const real = all.filter(isMensagemReal)
-  const first = real[0] || null
-  const last = real.length ? real[real.length - 1] : null
-
-  const iniciada_por = first
-    ? first.de === 'vendedor'
-      ? 'vendedor'
-      : 'comprador'
-    : c.iniciada_por || 'comprador'
-
-  const ultima_mensagem_de = last ? (last.de === 'vendedor' ? 'vendedor' : 'comprador') : c.ultima_mensagem_de
-
-  // unread da Vinted tem prioridade absoluta
-  if (c.vinted_unread) {
-    return { status_inbox: 'por_responder', iniciada_por, ultima_mensagem_de: 'comprador' }
-  }
-
-  return {
-    status_inbox: iniciada_por === 'vendedor' ? 'proposta_enviada' : 'proposta_recebida',
-    iniciada_por,
-    ultima_mensagem_de,
+    _raw: raw,
   }
 }
 
 function finalizeConversation(c) {
-  const classified = classifyConversation(c)
-  const lastReal = (c.mensagens || []).filter(isMensagemReal).slice(-1)[0]
+  const refined = refineClassification(c, c._raw || {}, c._userId)
+  const lastReal = (c.mensagens || []).filter((m) => m.tipo !== 'sistema').slice(-1)[0]
 
-  return {
+  const out = {
     ...c,
-    ...classified,
-    mensagens: (c.mensagens || []).slice(-8),
+    ...refined,
+    mensagens: (c.mensagens || []).slice(-8).map(({ _entity, _entityType, ...rest }) => rest),
     ultimo_texto: lastReal?.texto || c.ultimo_texto,
   }
+
+  delete out._raw
+  delete out._userId
+  return out
 }
 
 function mapItem(item, sourceUrl) {
@@ -313,6 +300,7 @@ function extractMessageText(entity, m) {
       entity.message ||
       entity.text ||
       entity.content ||
+      entity.offer?.price ||
       m.body ||
       m.text ||
       ''
@@ -333,18 +321,16 @@ function mapMessagesAll(rawMessages, currentUserId) {
     if (!texto) continue
 
     const userId = extractUserId(entity, m)
-    const isSystem = isSystemMessage(texto, entityType)
+    const isSystem = isSystemMessage(texto, entityType) && !isOfferEntity(entityType)
 
     out.push({
       texto,
       de: isSystem ? 'sistema' : String(userId) === String(currentUserId) ? 'vendedor' : 'comprador',
       data:
-        m.created_at ||
-        entity.created_at ||
-        entity.created_at_ts ||
-        m.created_at_ts ||
-        null,
-      tipo: isSystem ? 'sistema' : 'mensagem',
+        m.created_at || entity.created_at || entity.created_at_ts || m.created_at_ts || null,
+      tipo: isSystem ? 'sistema' : isOfferEntity(entityType) ? 'oferta' : 'mensagem',
+      _entity: entity,
+      _entityType: entityType,
     })
   }
 
@@ -369,23 +355,34 @@ function extractRawMessages(data) {
 
 async function fetchConversationMessages(conversationId, currentUserId) {
   const collected = []
+  const seen = new Set()
+
+  function addRaw(batch) {
+    for (const m of batch) {
+      const id = m.id || m.entity?.id || JSON.stringify(m).slice(0, 80)
+      if (!seen.has(id)) {
+        seen.add(id)
+        collected.push(m)
+      }
+    }
+  }
 
   const detailPaths = [
     `/api/v2/conversations/${conversationId}?mark_as_read=false`,
     `/api/v2/inbox/${conversationId}?mark_as_read=false`,
+    `/api/v2/conversations/${conversationId}/messages?per_page=100`,
   ]
 
   for (const path of detailPaths) {
     try {
       const data = await vintedFetch(path)
-      const raw = extractRawMessages(data)
-      if (raw.length) collected.push(...raw)
+      addRaw(extractRawMessages(data))
     } catch {
       // tentar próximo
     }
   }
 
-  for (let page = 1; page <= 4; page++) {
+  for (let page = 1; page <= 5; page++) {
     const paths = [
       `/api/v2/conversations/${conversationId}/messages?page=${page}&per_page=100`,
       `/api/v2/inbox/${conversationId}/messages?page=${page}&per_page=100`,
@@ -403,7 +400,7 @@ async function fetchConversationMessages(conversationId, currentUserId) {
     }
 
     if (!pageMessages.length) break
-    collected.push(...pageMessages)
+    addRaw(pageMessages)
     if (pageMessages.length < 100) break
   }
 
@@ -427,18 +424,12 @@ async function runPool(items, worker, concurrency = MESSAGE_FETCH_CONCURRENCY) {
   return results
 }
 
-function prioritizeForEnrichment(conversas) {
-  return [...conversas].sort((a, b) => {
-    if (a.vinted_unread !== b.vinted_unread) return a.vinted_unread ? -1 : 1
-    return new Date(b.data_atualizacao).getTime() - new Date(a.data_atualizacao).getTime()
-  })
-}
-
 async function enrichConversasWithMessages(conversas, userId) {
-  const quick = conversas.map((c) => finalizeConversation(c))
-  const priority = prioritizeForEnrichment(quick)
-  const toEnrich = priority.slice(0, MESSAGE_FETCH_BATCH)
-  const rest = priority.slice(MESSAGE_FETCH_BATCH)
+  const withMeta = conversas.map((c) => ({ ...c, _userId: userId }))
+
+  const toEnrich = withMeta.filter((c) => c.vinted_unread || c.precisa_responder).slice(0, MESSAGE_FETCH_BATCH_UNREAD)
+
+  const toEnrichIds = new Set(toEnrich.map((c) => c.id_vinted))
 
   await runPool(toEnrich, async (conversa) => {
     try {
@@ -449,7 +440,21 @@ async function enrichConversasWithMessages(conversas, userId) {
     return finalizeConversation(conversa)
   })
 
-  return [...toEnrich, ...rest.map((c) => finalizeConversation(c))]
+  return withMeta.map((c) => (toEnrichIds.has(c.id_vinted) ? c : finalizeConversation(c)))
+}
+
+async function syncInboxFast() {
+  const user = await fetchCurrentUser()
+  if (!user?.id) {
+    throw new Error('Não estás logado na Vinted. Faz login em vinted.pt primeiro.')
+  }
+
+  const conversas = (await fetchAllInbox(user.id)).map((c) => {
+    const fin = finalizeConversation({ ...c, _userId: user.id })
+    return fin
+  })
+
+  return { artigos: [], conversas, user: user.login || user.username, fast: true }
 }
 
 async function syncAllFromVinted() {
@@ -458,16 +463,18 @@ async function syncAllFromVinted() {
     throw new Error('Não estás logado na Vinted. Faz login em vinted.pt primeiro.')
   }
 
-  const conversasPromise = fetchAllInbox(user.id).then((list) => enrichConversasWithMessages(list, user.id))
-  const artigosPromise = fetchAllUserItems(user.id)
-
-  const [conversas, artigos] = await Promise.all([conversasPromise, artigosPromise])
+  const conversasRaw = await fetchAllInbox(user.id)
+  const [conversas, artigos] = await Promise.all([
+    enrichConversasWithMessages(conversasRaw, user.id),
+    fetchAllUserItems(user.id),
+  ])
 
   return { artigos, conversas, user: user.login || user.username }
 }
 
 window.__vintedHub = {
   syncAllFromVinted,
+  syncInboxFast,
   fetchAllInbox,
   fetchAllUserItems,
   fetchCurrentUser,

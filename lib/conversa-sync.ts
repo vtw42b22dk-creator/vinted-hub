@@ -20,6 +20,7 @@ export interface ConversaSyncInput {
   vinted_unread?: boolean
   iniciada_por?: IniciadaPor | null
   mensagens?: MensagemConversa[]
+  precisa_responder?: boolean
 }
 
 export interface ConversaExisting {
@@ -43,6 +44,8 @@ export function classificarConversa(
     vinted_unread: input.vinted_unread,
     item_fechado: false,
     iniciada_por: input.iniciada_por ?? existing?.iniciada_por ?? null,
+    ultimo_texto: input.ultimo_texto,
+    precisa_responder: input.precisa_responder,
   })
 
   return result.status_inbox

@@ -35,6 +35,7 @@ DECLARE
   v_existing record;
   v_status status_inbox;
   v_unread boolean;
+  v_precisa boolean;
 BEGIN
   SELECT id INTO v_user_id FROM public.profiles WHERE sync_secret = p_sync_secret;
   IF v_user_id IS NULL THEN
@@ -87,6 +88,7 @@ BEGIN
     END IF;
 
     v_unread := COALESCE((c->>'vinted_unread')::boolean, false);
+    v_precisa := COALESCE((c->>'precisa_responder')::boolean, false);
 
     v_status := CASE
       WHEN COALESCE(c->>'status_inbox', 'por_responder') IN ('por_responder','proposta_recebida','proposta_enviada','em_negociacao','arquivada')
@@ -94,19 +96,15 @@ BEGIN
       ELSE 'por_responder'::status_inbox
     END;
 
-    -- Unread da Vinted tem prioridade — nova mensagem reabre "por responder"
-    IF v_unread AND NOT COALESCE((c->>'item_fechado')::boolean, false) THEN
+    -- Por responder: unread OU última mensagem do comprador
+    IF (v_unread OR v_precisa) AND NOT COALESCE((c->>'item_fechado')::boolean, false) THEN
       v_status := 'por_responder';
-    END IF;
-
-    IF v_status = 'em_negociacao' THEN
+    ELSIF v_status = 'em_negociacao' THEN
       v_status := CASE COALESCE(c->>'iniciada_por', 'comprador')
         WHEN 'vendedor' THEN 'proposta_enviada'::status_inbox
         ELSE 'proposta_recebida'::status_inbox
       END;
-    END IF;
-
-    IF v_existing.aberta_em IS NOT NULL AND v_status = 'por_responder' AND NOT v_unread THEN
+    ELSIF v_status NOT IN ('arquivada', 'por_responder') THEN
       v_status := CASE COALESCE(c->>'iniciada_por', 'comprador')
         WHEN 'vendedor' THEN 'proposta_enviada'::status_inbox
         ELSE 'proposta_recebida'::status_inbox
@@ -151,6 +149,10 @@ BEGIN
       url_conversa = EXCLUDED.url_conversa,
       item_fechado = EXCLUDED.item_fechado,
       iniciada_por = COALESCE(EXCLUDED.iniciada_por, conversas.iniciada_por),
+      aberta_em = CASE
+        WHEN EXCLUDED.status_inbox = 'por_responder' AND (v_unread OR v_precisa) THEN NULL
+        ELSE conversas.aberta_em
+      END,
       mensagens_json = CASE
         WHEN jsonb_array_length(EXCLUDED.mensagens_json) > 0 THEN EXCLUDED.mensagens_json
         ELSE conversas.mensagens_json

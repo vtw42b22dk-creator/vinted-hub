@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vinted Hub Sync",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "Sync automático Vinted → dashboard privado",
   "permissions": ["activeTab", "storage", "scripting", "tabs", "alarms"],
   "host_permissions": [
@@ -26,7 +26,7 @@
         "https://www.vinted.com/*",
         "https://vinted.com/*"
       ],
-      "js": ["vinted-api.js", "content.js"],
+      "js": ["vinted-inbox.js", "vinted-api.js", "content.js"],
       "run_at": "document_idle"
     },
     {

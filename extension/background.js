@@ -1,8 +1,10 @@
 import { SYNC_INTERVAL_MS } from './config.js'
 import { getSyncSecret, saveSyncState, syncToSupabase } from './sync.js'
 
+let syncTick = 0
+
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v0.9 instalada')
+  console.log('Vinted Hub Sync v1.0 instalada')
   chrome.storage.local.set({ autoSyncEnabled: true })
 })
 
@@ -37,9 +39,11 @@ async function handleSync(explicitTabId, manual) {
   }
 
   const tab = await getVintedTab(explicitTabId)
-  const data = await extractFromTab(tab.id)
+  syncTick += 1
+  const fullSync = manual || syncTick % 5 === 0
+  const data = await extractFromTab(tab.id, fullSync)
 
-  if (!data.artigos?.length && !data.conversas?.length) {
+  if (!data.conversas?.length && !data.artigos?.length) {
     const err = 'Nada encontrado na Vinted. Confirma login em vinted.pt.'
     if (manual) await saveSyncState({ ok: false, error: err })
     throw new Error(err)
@@ -48,7 +52,7 @@ async function handleSync(explicitTabId, manual) {
   const result = await syncToSupabase(data, syncSecret)
   await saveSyncState({
     ok: true,
-    message: result.message,
+    message: `${fullSync ? 'Completo' : 'Rápido'}: ${result.message}`,
     at: new Date().toISOString(),
   })
 
@@ -70,26 +74,37 @@ async function getVintedTab(explicitTabId) {
   throw new Error('Abre vinted.pt numa tab e faz login primeiro.')
 }
 
-async function extractFromTab(tabId) {
+async function injectVintedScripts(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['vinted-inbox.js', 'vinted-api.js'],
+  })
+}
+
+async function extractFromTab(tabId, fullSync) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['vinted-api.js'] })
+    await injectVintedScripts(tabId)
   } catch {
     // já injectado
   }
 
+  const method = fullSync ? 'syncAllFromVinted' : 'syncInboxFast'
+
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async () => {
-      if (!window.__vintedHub) throw new Error('Recarrega a Vinted (F5) e tenta outra vez.')
-      return window.__vintedHub.syncAllFromVinted()
+    func: async (syncMethod) => {
+      if (!window.__vintedHub?.[syncMethod]) {
+        throw new Error('Recarrega a Vinted (F5) e tenta outra vez.')
+      }
+      return window.__vintedHub[syncMethod]()
     },
+    args: [method],
   })
 
   if (injection?.result) return injection.result
   throw new Error('Não foi possível ler a Vinted. Recarrega a página (F5).')
 }
 
-// Alarm backup — service worker acorda a cada 10s
 chrome.alarms.create('autoSync', { periodInMinutes: 1 })
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== 'autoSync') return
@@ -104,7 +119,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 })
 
-// Auto-sync interval
 setInterval(async () => {
   const { autoSyncEnabled } = await chrome.storage.local.get(['autoSyncEnabled'])
   if (autoSyncEnabled === false) return
