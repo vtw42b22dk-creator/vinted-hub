@@ -1,10 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import type { Compra } from '@/lib/types'
 import { formatEuro, formatRelativeTime } from '@/lib/utils'
 import { isHoje } from '@/lib/vendas-queries'
-import { somarLucro, somarVendaPreco, vendidosHoje } from '@/lib/investimento-queries'
+import { eliminarCompra, somarLucro, somarVendaPreco, vendidosHoje } from '@/lib/investimento-queries'
 
 function VendaFoto({ fotoUrl, titulo }: { fotoUrl: string | null; titulo: string }) {
   if (fotoUrl) {
@@ -42,8 +43,15 @@ function MetricCard({
   )
 }
 
-export default function VendasPanel({ vendas }: { vendas: Compra[] }) {
+export default function VendasPanel({
+  vendas,
+  onRefresh,
+}: {
+  vendas: Compra[]
+  onRefresh?: () => void
+}) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
 
   const totalGeral = useMemo(() => somarVendaPreco(vendas), [vendas])
   const totalDeHoje = useMemo(() => vendidosHoje(vendas), [vendas])
@@ -67,6 +75,23 @@ export default function VendasPanel({ vendas }: { vendas: Compra[] }) {
 
   function limpar() {
     setSelected(new Set())
+  }
+
+  async function eliminar(ids: string[], label: string) {
+    if (ids.length === 0) return
+    if (!confirm(`Eliminar ${label}? Isto remove-a das vendas.`)) return
+    setBusy(true)
+    const supabase = createClient()
+    for (const id of ids) {
+      await eliminarCompra(supabase, id)
+    }
+    setBusy(false)
+    setSelected((prev) => {
+      const next = new Set(prev)
+      ids.forEach((id) => next.delete(id))
+      return next
+    })
+    onRefresh?.()
   }
 
   return (
@@ -104,13 +129,23 @@ export default function VendasPanel({ vendas }: { vendas: Compra[] }) {
               {formatEuro(lucroSelecionado)})
             </span>
           </p>
-          <button
-            type="button"
-            onClick={limpar}
-            className="text-xs font-medium text-amber-800 hover:underline"
-          >
-            Limpar seleção
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => eliminar(Array.from(selected), `${selected.size} venda(s)`)}
+              className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              Eliminar selecionadas
+            </button>
+            <button
+              type="button"
+              onClick={limpar}
+              className="text-xs font-medium text-amber-800 hover:underline"
+            >
+              Limpar seleção
+            </button>
+          </div>
         </div>
       )}
 
@@ -183,6 +218,19 @@ export default function VendasPanel({ vendas }: { vendas: Compra[] }) {
                       {formatEuro(lucro)}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      eliminar([venda.id], `"${venda.titulo}"`)
+                    }}
+                    className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                    title="Eliminar venda"
+                  >
+                    ✕
+                  </button>
                 </label>
               )
             })}

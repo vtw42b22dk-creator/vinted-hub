@@ -32,8 +32,6 @@ ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS pasta_id UUID REFERENCES p
 -- Detalhe do artigo (para o modal do inventário)
 ALTER TABLE public.artigos_vinted ADD COLUMN IF NOT EXISTS descricao TEXT;
 ALTER TABLE public.artigos_vinted ADD COLUMN IF NOT EXISTS categoria TEXT;
--- Marcar anúncios como "relevantes" (aba dedicada no dashboard)
-ALTER TABLE public.artigos_vinted ADD COLUMN IF NOT EXISTS relevante BOOLEAN NOT NULL DEFAULT false;
 
 -- Recriar a view para incluir as colunas novas
 DROP VIEW IF EXISTS public.artigos_vinted_com_lucro;
@@ -110,6 +108,38 @@ CREATE INDEX IF NOT EXISTS idx_investimento_user ON public.investimento (user_id
 DO $$
 BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE public.investimento;
+EXCEPTION WHEN duplicate_object OR undefined_object THEN
+  NULL;
+END $$;
+
+-- Relevantes: anúncios que quero COMPRAR (marcados na Vinted pela extensão)
+CREATE TABLE IF NOT EXISTS public.relevantes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  id_item TEXT NOT NULL,
+  titulo TEXT NOT NULL DEFAULT 'Artigo',
+  preco NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  marca TEXT,
+  tamanho TEXT,
+  foto_url TEXT,
+  url_item TEXT,
+  vendedor TEXT,
+  notas TEXT,
+  sincronizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT relevantes_user_item_unique UNIQUE (user_id, id_item)
+);
+
+ALTER TABLE public.relevantes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "relevantes_own" ON public.relevantes;
+CREATE POLICY "relevantes_own" ON public.relevantes
+  FOR ALL USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE INDEX IF NOT EXISTS idx_relevantes_user ON public.relevantes (user_id, criado_em DESC);
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.relevantes;
 EXCEPTION WHEN duplicate_object OR undefined_object THEN
   NULL;
 END $$;
@@ -339,9 +369,56 @@ BEGIN
 END;
 $$;
 
+-- Adicionar UM anúncio aos "relevantes" (a comprar) a partir do botão na Vinted.
+CREATE OR REPLACE FUNCTION public.add_relevante(
+  p_sync_secret text,
+  p_item jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user_id uuid;
+  i jsonb := p_item;
+BEGIN
+  SELECT id INTO v_user_id FROM public.profiles WHERE sync_secret = p_sync_secret;
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Sync secret inválido — abre o dashboard para ligar a extensão';
+  END IF;
+
+  IF i IS NULL OR i->>'id_item' IS NULL THEN
+    RAISE EXCEPTION 'Artigo inválido';
+  END IF;
+
+  INSERT INTO public.relevantes (
+    user_id, id_item, titulo, preco, marca, tamanho, foto_url, url_item, vendedor
+  ) VALUES (
+    v_user_id, i->>'id_item', COALESCE(NULLIF(i->>'titulo', ''), 'Artigo'),
+    COALESCE((i->>'preco')::numeric, 0), NULLIF(i->>'marca', ''),
+    NULLIF(i->>'tamanho', ''), NULLIF(i->>'foto_url', ''),
+    NULLIF(i->>'url_item', ''), NULLIF(i->>'vendedor', '')
+  )
+  ON CONFLICT (user_id, id_item) DO UPDATE SET
+    titulo = EXCLUDED.titulo,
+    preco = EXCLUDED.preco,
+    marca = EXCLUDED.marca,
+    tamanho = EXCLUDED.tamanho,
+    foto_url = EXCLUDED.foto_url,
+    url_item = EXCLUDED.url_item,
+    vendedor = EXCLUDED.vendedor,
+    sincronizado_em = now();
+
+  RETURN jsonb_build_object('ok', true);
+END;
+$$;
+
 REVOKE ALL ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb, jsonb, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb, jsonb, jsonb) TO anon, authenticated;
 REVOKE ALL ON FUNCTION public.add_conversa_manual(text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.add_conversa_manual(text, jsonb) TO anon, authenticated;
+REVOKE ALL ON FUNCTION public.add_relevante(text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.add_relevante(text, jsonb) TO anon, authenticated;
 REVOKE ALL ON FUNCTION public.get_pastas_ext(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_pastas_ext(text) TO anon, authenticated;

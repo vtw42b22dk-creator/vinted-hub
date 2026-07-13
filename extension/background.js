@@ -1,6 +1,7 @@
 import { SYNC_INTERVAL_MS } from './config.js'
 import {
   addConversaToSupabase,
+  addRelevanteToSupabase,
   getPastasFromSupabase,
   getSyncSecret,
   saveSyncState,
@@ -8,7 +9,7 @@ import {
 } from './sync.js'
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v2.4 instalada')
+  console.log('Vinted Hub Sync v2.5 instalada')
   chrome.storage.local.set({ autoSyncEnabled: true })
 })
 
@@ -38,6 +39,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
+  if (message.action === 'addRelevante') {
+    handleAddRelevante(message.item)
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }))
+    return true
+  }
+
   if (message.action === 'configUpdated') {
     handleSync(undefined, false).then(() => {}).catch(() => {})
     sendResponse({ ok: true })
@@ -61,6 +69,17 @@ async function handleAddConversa(conversa) {
     throw new Error('Conversa inválida.')
   }
   return addConversaToSupabase(conversa, syncSecret)
+}
+
+async function handleAddRelevante(item) {
+  const syncSecret = await getSyncSecret()
+  if (!syncSecret) {
+    throw new Error('Abre o dashboard (com login) para ligar a extensão.')
+  }
+  if (!item?.id_item) {
+    throw new Error('Artigo inválido.')
+  }
+  return addRelevanteToSupabase(item, syncSecret)
 }
 
 async function handleSync(explicitTabId, manual) {

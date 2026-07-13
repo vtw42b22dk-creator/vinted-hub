@@ -79,12 +79,26 @@ export interface ArtigoVinted {
   categoria: string | null
   foto_url: string | null
   url_vinted: string | null
-  relevante?: boolean
   sincronizado_em: string
   atualizado_em: string
   criado_em: string
   lucro_bruto?: number
   margem_percentual?: number
+}
+
+// Anúncio que quero comprar (marcado na Vinted com o botão da extensão)
+export interface Relevante {
+  id: string
+  id_item: string
+  titulo: string
+  preco: number
+  marca: string | null
+  tamanho: string | null
+  foto_url: string | null
+  url_item: string | null
+  vendedor: string | null
+  notas: string | null
+  criado_em: string
 }
 
 export interface Venda {

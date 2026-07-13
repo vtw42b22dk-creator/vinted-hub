@@ -12,9 +12,12 @@ Dashboard privado para gerir a tua conta Vinted: mensagens, negociações e inve
 
 | Rota | Função |
 |------|--------|
-| `/` | Visão geral + inventário manual |
+| `/` | Visão geral |
 | `/inbox` | Mensagens & negociações (filtros) |
-| `/inventario` | Stock Vinted auto-sync + edição de custo |
+| `/relevantes` | Anúncios a comprar (marcados na Vinted com ⭐) |
+| `/investimento` | Compras desde ontem (mover p/ vendidos) |
+| `/vendas` | Vendas (movidas do investimento) + eliminar |
+| `/analytics` | Lucro, ROI, ritmo de compras/vendas |
 
 ## Setup Supabase
 

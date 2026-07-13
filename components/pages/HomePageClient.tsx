@@ -91,16 +91,13 @@ export default function HomePageClient() {
             <p className="mt-1 text-3xl font-bold text-slate-900">{inboxCounts.total}</p>
             <p className="mt-2 text-xs text-sky-600">Ver mensagens e apontamentos →</p>
           </Link>
-          <Link
-            href="/inventario"
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
-          >
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-medium text-slate-500">Valor potencial à venda</p>
             <p className="mt-1 text-3xl font-bold text-slate-900">
               {formatEuro(vintedMetrics.valorPotencial)}
             </p>
-            <p className="mt-2 text-xs text-sky-600">{vintedMetrics.totalAtivos} artigos à venda →</p>
-          </Link>
+            <p className="mt-2 text-xs text-slate-400">{vintedMetrics.totalAtivos} artigos à venda</p>
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">

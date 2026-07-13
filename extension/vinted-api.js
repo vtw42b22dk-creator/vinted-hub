@@ -536,6 +536,33 @@ async function buildConversaManual(conversationId) {
   }
 }
 
+// ---------- Relevantes (anúncios a comprar, marcados na Vinted) ----------
+
+async function buildRelevante(itemId) {
+  const detail = await fetchItemDetail(itemId)
+  if (!detail) {
+    throw new Error('Não consegui ler o artigo. Recarrega a página (F5).')
+  }
+  const seller = detail.user || detail.seller || {}
+  const foto =
+    detail.photo?.url ||
+    detail.photo?.full_size_url ||
+    detail.photos?.[0]?.url ||
+    detail.photos?.[0]?.full_size_url ||
+    null
+
+  return {
+    id_item: String(itemId),
+    titulo: detail.title || detail.name || `Artigo ${itemId}`,
+    preco: parsePrice(detail.price || detail.total_item_price || detail.price_amount),
+    marca: detail.brand_title || detail.brand?.title || null,
+    tamanho: detail.size_title || detail.size?.title || null,
+    foto_url: foto,
+    url_item: `${window.location.origin}/items/${itemId}`,
+    vendedor: seller.login || seller.username || null,
+  }
+}
+
 // ---------- Sync automático (só inventário) ----------
 
 async function syncAllFromVinted() {
@@ -562,4 +589,5 @@ window.__vintedHub = {
   fetchCurrentUser,
   fetchConversationMessages,
   buildConversaManual,
+  buildRelevante,
 }

@@ -171,6 +171,110 @@ async function addConversa(btn, conversationId, pastaId) {
   setTimeout(() => setCornerState(btn, 'idle'), 4000)
 }
 
+// ---------- Botão "★ Relevante" na capa de cada anúncio ----------
+
+const REL_BTN_CLASS = 'vinted-hub-rel-btn'
+
+function extractItemId(href) {
+  const m = String(href || '').match(/\/items\/(\d+)/)
+  return m ? m[1] : null
+}
+
+// Sobe até encontrar o cartão do artigo (o ancestral que contém a imagem)
+function findCardHost(anchor) {
+  let el = anchor
+  for (let i = 0; i < 5 && el; i++) {
+    if (el.querySelector && el.querySelector('img')) return el
+    el = el.parentElement
+  }
+  return anchor
+}
+
+function setRelBtn(btn, state) {
+  if (state === 'ok') {
+    btn.textContent = '✓'
+    btn.style.background = '#059669'
+    btn.style.color = '#fff'
+  } else if (state === 'erro') {
+    btn.textContent = '✗'
+    btn.style.background = '#dc2626'
+    btn.style.color = '#fff'
+  } else if (state === 'loading') {
+    btn.textContent = '…'
+    btn.style.background = '#f59e0b'
+    btn.style.color = '#fff'
+  } else {
+    btn.textContent = '★'
+    btn.style.background = 'rgba(255,255,255,.92)'
+    btn.style.color = '#94a3b8'
+  }
+}
+
+async function onRelClick(btn, itemId) {
+  if (btn.dataset.busy === '1') return
+  btn.dataset.busy = '1'
+  setRelBtn(btn, 'loading')
+  try {
+    if (!window.__vintedHub?.buildRelevante) throw new Error('Recarrega a página (F5)')
+    const item = await window.__vintedHub.buildRelevante(itemId)
+    const result = await chrome.runtime.sendMessage({ action: 'addRelevante', item })
+    setRelBtn(btn, result?.ok ? 'ok' : 'erro')
+  } catch {
+    setRelBtn(btn, 'erro')
+  }
+  setTimeout(() => {
+    btn.dataset.busy = '0'
+    setRelBtn(btn, 'idle')
+  }, 2500)
+}
+
+function makeRelBtn(itemId) {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = REL_BTN_CLASS
+  btn.title = 'Guardar em Relevantes (quero comprar)'
+  btn.style.cssText =
+    'position:absolute;top:6px;left:6px;z-index:50;width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center;border:none;border-radius:9999px;font-size:16px;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.25);font-family:system-ui,sans-serif'
+  setRelBtn(btn, 'idle')
+  btn.addEventListener(
+    'click',
+    (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onRelClick(btn, itemId)
+    },
+    true
+  )
+  return btn
+}
+
+function injectRelevanteButtons() {
+  const anchors = document.querySelectorAll('a[href*="/items/"]')
+  for (const anchor of anchors) {
+    const itemId = extractItemId(anchor.getAttribute('href'))
+    if (!itemId) continue
+
+    const host = findCardHost(anchor)
+    if (!host || host.dataset.vhRel === itemId) continue
+
+    const rect = host.getBoundingClientRect()
+    if (rect.width < 80 || rect.height < 80) continue
+
+    host.dataset.vhRel = itemId
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative'
+    host.appendChild(makeRelBtn(itemId))
+  }
+}
+
+let injectTimer = null
+function scheduleInject() {
+  if (injectTimer) return
+  injectTimer = setTimeout(() => {
+    injectTimer = null
+    injectRelevanteButtons()
+  }, 600)
+}
+
 // ---------- Init ----------
 
 function watchNavigation() {
@@ -181,12 +285,19 @@ function watchNavigation() {
     }
   }, 800)
 
-  const observer = new MutationObserver(() => ensureCornerButton())
-  observer.observe(document.body, { childList: true })
+  const observer = new MutationObserver(() => {
+    ensureCornerButton()
+    scheduleInject()
+  })
+  observer.observe(document.body, { childList: true, subtree: true })
+
+  // Rede de segurança para scroll infinito
+  setInterval(injectRelevanteButtons, 2500)
 }
 
 function init() {
   ensureCornerButton()
+  injectRelevanteButtons()
   watchNavigation()
   scheduleAutoSync(4000)
 }

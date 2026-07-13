@@ -56,7 +56,7 @@ export default function VendasPageClient() {
               </div>
             )}
 
-            <VendasPanel vendas={vendas} />
+            <VendasPanel vendas={vendas} onRefresh={load} />
           </div>
         </>
       )}
