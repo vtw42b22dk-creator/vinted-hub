@@ -12,7 +12,7 @@ interface ConversaThreadModalProps {
 function getMensagens(conversa: Conversa): MensagemConversa[] {
   const stored = conversa.mensagens_json
   if (Array.isArray(stored) && stored.length > 0) {
-    return stored.slice(-5)
+    return stored.slice(-8)
   }
 
   if (conversa.ultimo_texto) {

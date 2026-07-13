@@ -33,7 +33,6 @@ export function classificarConversaFromMensagens(input: {
   mensagens: MensagemConversa[]
   vinted_unread?: boolean
   item_fechado?: boolean
-  aberta_em?: string | null
   iniciada_por?: IniciadaPor | null
 }): { status_inbox: StatusInbox; iniciada_por: IniciadaPor | null; ultima_mensagem_de: 'comprador' | 'vendedor' } {
   if (input.item_fechado) {
@@ -41,20 +40,14 @@ export function classificarConversaFromMensagens(input: {
   }
 
   const mensagens = input.mensagens ?? []
-  const iniciada_por = inferirIniciadaPor(mensagens) ?? input.iniciada_por ?? null
+  const iniciada_por = inferirIniciadaPor(mensagens) ?? input.iniciada_por ?? 'comprador'
   const last = ultimaMensagemReal(mensagens)
   const ultima_mensagem_de: 'comprador' | 'vendedor' =
     last?.de === 'vendedor' ? 'vendedor' : 'comprador'
 
-  const unread = Boolean(input.vinted_unread)
-  const precisaResponder = unread && ultima_mensagem_de === 'comprador'
-
-  if (precisaResponder) {
-    return { status_inbox: 'por_responder', iniciada_por, ultima_mensagem_de }
-  }
-
-  if (input.aberta_em && unread) {
-    return { status_inbox: statusPorIniciada(iniciada_por), iniciada_por, ultima_mensagem_de }
+  // A Vinted marca unread — fonte mais fiável para "por responder"
+  if (input.vinted_unread) {
+    return { status_inbox: 'por_responder', iniciada_por, ultima_mensagem_de: 'comprador' }
   }
 
   return {

@@ -94,6 +94,11 @@ BEGIN
       ELSE 'por_responder'::status_inbox
     END;
 
+    -- Unread da Vinted tem prioridade — nova mensagem reabre "por responder"
+    IF v_unread AND NOT COALESCE((c->>'item_fechado')::boolean, false) THEN
+      v_status := 'por_responder';
+    END IF;
+
     IF v_status = 'em_negociacao' THEN
       v_status := CASE COALESCE(c->>'iniciada_por', 'comprador')
         WHEN 'vendedor' THEN 'proposta_enviada'::status_inbox
@@ -132,7 +137,7 @@ BEGIN
       false,
       NULLIF(c->>'iniciada_por', ''),
       COALESCE(c->'mensagens', '[]'::jsonb),
-      now()
+      COALESCE((c->>'data_atualizacao')::timestamptz, now())
     )
     ON CONFLICT (user_id, id_vinted) DO UPDATE SET
       user_comprador = EXCLUDED.user_comprador,
@@ -150,20 +155,11 @@ BEGIN
         WHEN jsonb_array_length(EXCLUDED.mensagens_json) > 0 THEN EXCLUDED.mensagens_json
         ELSE conversas.mensagens_json
       END,
-      data_atualizacao = now()
+      data_atualizacao = COALESCE(EXCLUDED.data_atualizacao, conversas.data_atualizacao)
     WHERE NOT conversas.suprimida;
 
     v_conversas := v_conversas + 1;
   END LOOP;
-
-  UPDATE public.conversas
-  SET status_inbox = 'arquivada', item_fechado = true
-  WHERE user_id = v_user_id
-    AND NOT suprimida
-    AND id_artigo_vinted IN (
-      SELECT id_artigo FROM public.artigos_vinted
-      WHERE user_id = v_user_id AND status_artigo IN ('vendido', 'oculto')
-    );
 
   RETURN jsonb_build_object('ok', true, 'artigos', v_artigos, 'conversas', v_conversas);
 END;

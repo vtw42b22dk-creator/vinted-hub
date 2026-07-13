@@ -38,18 +38,12 @@ export function classificarConversa(
     return 'arquivada'
   }
 
-  const mensagens = input.mensagens ?? []
   const result = classificarConversaFromMensagens({
-    mensagens,
+    mensagens: input.mensagens ?? [],
     vinted_unread: input.vinted_unread,
     item_fechado: false,
-    aberta_em: existing?.aberta_em,
     iniciada_por: input.iniciada_por ?? existing?.iniciada_por ?? null,
   })
-
-  if (existing?.aberta_em && result.status_inbox === 'por_responder' && !input.vinted_unread) {
-    return result.iniciada_por === 'vendedor' ? 'proposta_enviada' : 'proposta_recebida'
-  }
 
   return result.status_inbox
 }
