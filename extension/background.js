@@ -8,7 +8,7 @@ import {
 } from './sync.js'
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v2.2 instalada')
+  console.log('Vinted Hub Sync v2.3 instalada')
   chrome.storage.local.set({ autoSyncEnabled: true })
 })
 
@@ -74,7 +74,7 @@ async function handleSync(explicitTabId, manual) {
   const tab = await getVintedTab(explicitTabId)
   const data = await extractFromTab(tab.id)
 
-  if (!data.artigos?.length && !data.vendas?.length) {
+  if (!data.artigos?.length && !data.vendas?.length && !data.compras?.length) {
     const err = 'Nada encontrado na Vinted. Confirma login em vinted.pt.'
     if (manual) await saveSyncState({ ok: false, error: err })
     throw new Error(err)

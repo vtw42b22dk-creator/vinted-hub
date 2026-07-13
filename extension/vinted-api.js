@@ -213,13 +213,13 @@ function mapVenda(order) {
   }
 }
 
-async function fetchSoldOrders() {
+async function fetchOrders(orderType, mapper) {
   const collected = []
   const seen = new Set()
 
   const builders = [
-    (p) => `/api/v2/my_orders?type=sold&page=${p}&per_page=20`,
-    (p) => `/api/v2/my_orders?order_type=sold&page=${p}&per_page=20`,
+    (p) => `/api/v2/my_orders?type=${orderType}&page=${p}&per_page=20`,
+    (p) => `/api/v2/my_orders?order_type=${orderType}&page=${p}&per_page=20`,
   ]
 
   for (const build of builders) {
@@ -232,10 +232,10 @@ async function fetchSoldOrders() {
         if (!orders.length) break
 
         for (const o of orders) {
-          const v = mapVenda(o)
-          if (v && !seen.has(v.id_venda)) {
-            seen.add(v.id_venda)
-            collected.push(v)
+          const mapped = mapper(o)
+          if (mapped && !seen.has(mapped._key)) {
+            seen.add(mapped._key)
+            collected.push(mapped.value)
           }
         }
 
@@ -250,6 +250,70 @@ async function fetchSoldOrders() {
   }
 
   return collected
+}
+
+async function fetchSoldOrders() {
+  return fetchOrders('sold', (o) => {
+    const v = mapVenda(o)
+    return v ? { _key: v.id_venda, value: v } : null
+  })
+}
+
+function mapCompra(order) {
+  const id =
+    order.id ?? order.transaction_id ?? order.transaction?.id ?? order.order_id ?? order.item_id
+  if (id == null) return null
+
+  const seller = order.seller || order.user || order.opposite_user || order.transaction?.seller || {}
+  const item = order.item || order.transaction?.item || {}
+  const itemId = order.item_id ?? item.id ?? order.transaction?.item_id ?? null
+
+  const foto =
+    order.photo?.url ||
+    order.image_url ||
+    order.thumbnail_url ||
+    item.photo?.url ||
+    (Array.isArray(order.item_photos) ? order.item_photos[0]?.url : null) ||
+    null
+
+  const preco = parsePrice(
+    order.price ??
+      order.item_price ??
+      order.total_item_price ??
+      order.transaction?.item_price ??
+      order.amount ??
+      item.price
+  )
+
+  let data =
+    order.date ||
+    order.completed_at ||
+    order.purchased_at ||
+    order.updated_at ||
+    order.transaction?.updated_at ||
+    order.created_at ||
+    new Date().toISOString()
+  if (typeof data === 'number') {
+    data = new Date(data * (data < 1e12 ? 1000 : 1)).toISOString()
+  }
+
+  return {
+    id_compra: String(id),
+    titulo: order.title || order.item_title || item.title || 'Compra',
+    preco_compra: preco,
+    vendedor: seller.login || seller.username || null,
+    foto_url: foto,
+    url_compra: itemId != null ? `${window.location.origin}/items/${itemId}` : null,
+    id_artigo: itemId != null ? String(itemId) : null,
+    data_compra: data,
+  }
+}
+
+async function fetchPurchasedOrders() {
+  return fetchOrders('purchased', (o) => {
+    const c = mapCompra(o)
+    return c ? { _key: c.id_compra, value: c } : null
+  })
 }
 
 function mapItemStatus(item, urlHint) {
@@ -483,14 +547,17 @@ async function syncAllFromVinted() {
   const artigos = await fetchAllUserItems(user.id)
   await enrichActiveItems(artigos)
   const vendas = await fetchSoldOrders()
+  const compras = await fetchPurchasedOrders()
+  const synced_ids = artigos.map((a) => a.id_artigo)
 
-  return { artigos, vendas, user: user.login || user.username }
+  return { artigos, vendas, compras, synced_ids, user: user.login || user.username }
 }
 
 window.__vintedHub = {
   syncAllFromVinted,
   fetchAllUserItems,
   fetchSoldOrders,
+  fetchPurchasedOrders,
   fetchCurrentUser,
   fetchConversationMessages,
   buildConversaManual,

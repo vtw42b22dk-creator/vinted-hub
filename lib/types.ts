@@ -99,6 +99,25 @@ export interface Venda {
   criado_em: string
 }
 
+export type EstadoInvestimento = 'comprado' | 'vendido'
+
+export interface Compra {
+  id: string
+  id_compra: string
+  titulo: string
+  preco_compra: number
+  foto_url: string | null
+  url_compra: string | null
+  id_artigo: string | null
+  data_compra: string
+  estado: EstadoInvestimento
+  preco_venda: number | null
+  data_venda: string | null
+  notas: string | null
+  removida: boolean
+  criado_em: string
+}
+
 export interface InventarioMetrics {
   totalAtivos: number
   investimentoTotal: number

@@ -76,6 +76,42 @@ EXCEPTION WHEN duplicate_object OR undefined_object THEN
   NULL;
 END $$;
 
+-- Investimento: artigos comprados (my_orders?order_type=purchased)
+-- estado 'comprado' = em stock; 'vendido' = já revendido (preco_venda definido pelo utilizador)
+CREATE TABLE IF NOT EXISTS public.investimento (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  id_compra TEXT NOT NULL,
+  titulo TEXT NOT NULL DEFAULT 'Compra',
+  preco_compra NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  foto_url TEXT,
+  url_compra TEXT,
+  id_artigo TEXT,
+  data_compra TIMESTAMPTZ NOT NULL DEFAULT now(),
+  estado TEXT NOT NULL DEFAULT 'comprado' CHECK (estado IN ('comprado', 'vendido')),
+  preco_venda NUMERIC(10, 2),
+  data_venda TIMESTAMPTZ,
+  notas TEXT,
+  removida BOOLEAN NOT NULL DEFAULT false,
+  sincronizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT investimento_user_compra_unique UNIQUE (user_id, id_compra)
+);
+
+ALTER TABLE public.investimento ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "investimento_own" ON public.investimento;
+CREATE POLICY "investimento_own" ON public.investimento
+  FOR ALL USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE INDEX IF NOT EXISTS idx_investimento_user ON public.investimento (user_id, estado, removida);
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.investimento;
+EXCEPTION WHEN duplicate_object OR undefined_object THEN
+  NULL;
+END $$;
+
 -- Limpar dados demo antigos (causavam artigos repetidos)
 DELETE FROM public.conversas WHERE id_vinted IN ('conv-001','conv-002','conv-003','conv-004','conv-005');
 DELETE FROM public.artigos_vinted WHERE id_artigo IN ('100001','100002','100003','100004','100005');
@@ -114,13 +150,16 @@ BEGIN
 END;
 $$;
 
--- Sync automático: inventário (artigos à venda) + vendas concluídas.
+-- Sync automático: inventário + vendas + compras (investimento).
 DROP FUNCTION IF EXISTS public.sync_from_vinted(text, jsonb, jsonb);
+DROP FUNCTION IF EXISTS public.sync_from_vinted(text, jsonb, jsonb, jsonb, jsonb);
 
 CREATE OR REPLACE FUNCTION public.sync_from_vinted(
   p_sync_secret text,
   p_artigos jsonb DEFAULT '[]'::jsonb,
-  p_vendas jsonb DEFAULT '[]'::jsonb
+  p_vendas jsonb DEFAULT '[]'::jsonb,
+  p_compras jsonb DEFAULT '[]'::jsonb,
+  p_synced_ids jsonb DEFAULT '[]'::jsonb
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -131,6 +170,7 @@ DECLARE
   v_user_id uuid;
   v_artigos int := 0;
   v_vendas int := 0;
+  v_compras int := 0;
   a jsonb;
   s jsonb;
 BEGIN
@@ -163,6 +203,16 @@ BEGIN
     v_artigos := v_artigos + 1;
   END LOOP;
 
+  -- Reconciliação: artigos que já não voltam da Vinted (vendidos/removidos)
+  -- saem do inventário. Só corre se recebermos a lista completa sincronizada.
+  IF jsonb_array_length(COALESCE(p_synced_ids, '[]'::jsonb)) > 0 THEN
+    UPDATE public.artigos_vinted
+    SET status_artigo = 'vendido', atualizado_em = now()
+    WHERE user_id = v_user_id
+      AND status_artigo IN ('ativo', 'reservado')
+      AND id_artigo NOT IN (SELECT jsonb_array_elements_text(p_synced_ids));
+  END IF;
+
   FOR s IN SELECT value FROM jsonb_array_elements(COALESCE(p_vendas, '[]'::jsonb))
   LOOP
     CONTINUE WHEN s->>'id_venda' IS NULL;
@@ -182,7 +232,30 @@ BEGIN
     v_vendas := v_vendas + 1;
   END LOOP;
 
-  RETURN jsonb_build_object('ok', true, 'artigos', v_artigos, 'vendas', v_vendas);
+  -- Compras (investimento). Preserva estado/preco_venda/data_venda/removida definidos pelo utilizador.
+  FOR s IN SELECT value FROM jsonb_array_elements(COALESCE(p_compras, '[]'::jsonb))
+  LOOP
+    CONTINUE WHEN s->>'id_compra' IS NULL;
+    INSERT INTO public.investimento (
+      user_id, id_compra, titulo, preco_compra, foto_url, url_compra, id_artigo, data_compra
+    ) VALUES (
+      v_user_id, s->>'id_compra', COALESCE(NULLIF(s->>'titulo', ''), 'Compra'),
+      COALESCE((s->>'preco_compra')::numeric, 0), NULLIF(s->>'foto_url', ''),
+      NULLIF(s->>'url_compra', ''), NULLIF(s->>'id_artigo', ''),
+      COALESCE((s->>'data_compra')::timestamptz, now())
+    )
+    ON CONFLICT (user_id, id_compra) DO UPDATE SET
+      titulo = EXCLUDED.titulo,
+      preco_compra = EXCLUDED.preco_compra,
+      foto_url = EXCLUDED.foto_url,
+      url_compra = EXCLUDED.url_compra,
+      id_artigo = EXCLUDED.id_artigo,
+      data_compra = EXCLUDED.data_compra,
+      sincronizado_em = now();
+    v_compras := v_compras + 1;
+  END LOOP;
+
+  RETURN jsonb_build_object('ok', true, 'artigos', v_artigos, 'vendas', v_vendas, 'compras', v_compras);
 END;
 $$;
 
@@ -264,8 +337,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb) TO anon, authenticated;
+REVOKE ALL ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb, jsonb, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.sync_from_vinted(text, jsonb, jsonb, jsonb, jsonb) TO anon, authenticated;
 REVOKE ALL ON FUNCTION public.add_conversa_manual(text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.add_conversa_manual(text, jsonb) TO anon, authenticated;
 REVOKE ALL ON FUNCTION public.get_pastas_ext(text) FROM PUBLIC;

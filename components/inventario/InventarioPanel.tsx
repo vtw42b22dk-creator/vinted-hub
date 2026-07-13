@@ -101,22 +101,18 @@ function ArtigoFoto({
   )
 }
 
-function ArtigoDetailModal({
-  artigo,
-  onClose,
-  onRefresh,
-}: {
-  artigo: ArtigoVinted | null
-  onClose: () => void
+interface ArtigoCardProps {
+  artigo: ArtigoVinted
   onRefresh?: () => void
-}) {
-  if (!artigo) return null
+}
 
+function ArtigoCard({ artigo, onRefresh }: ArtigoCardProps) {
+  const [aberto, setAberto] = useState(false)
   const lucro = Number(artigo.lucro_bruto ?? artigo.preco_venda - artigo.preco_custo)
   const margem = Number(artigo.margem_percentual ?? 0)
+  const meta = [artigo.marca, artigo.tamanho].filter(Boolean).join(' · ')
 
   const specs: { label: string; value: string | null }[] = [
-    { label: 'Preço de venda', value: formatEuro(Number(artigo.preco_venda)) },
     { label: 'Categoria', value: artigo.categoria },
     { label: 'Marca', value: artigo.marca },
     { label: 'Tamanho', value: artigo.tamanho },
@@ -124,87 +120,89 @@ function ArtigoDetailModal({
   ]
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-4 sm:items-center"
-      onClick={onClose}
-    >
-      <div
-        className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
+    <article className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        className="flex gap-3 text-left"
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
-          <h3 className="text-base font-semibold leading-snug text-slate-900">{artigo.nome}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-            aria-label="Fechar"
-          >
-            ✕
-          </button>
+        <ArtigoFoto fotoUrl={artigo.foto_url} nome={artigo.nome} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900">
+              {artigo.nome}
+            </h3>
+            <span className={statusVintedBadgeClasses(artigo.status_artigo)}>
+              {statusVintedLabel(artigo.status_artigo)}
+            </span>
+          </div>
+          {meta && <p className="mt-1 text-xs text-slate-500">{meta}</p>}
+          {artigo.categoria && (
+            <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-400">{artigo.categoria}</p>
+          )}
         </div>
+      </button>
 
-        <div className="flex-1 space-y-4 overflow-y-auto p-5">
-          <div className="flex gap-4">
-            <ArtigoFoto fotoUrl={artigo.foto_url} nome={artigo.nome} size="h-28 w-28" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <span className={statusVintedBadgeClasses(artigo.status_artigo)}>
-                {statusVintedLabel(artigo.status_artigo)}
-              </span>
-              <dl className="space-y-1 text-sm">
-                {specs.map(
-                  (s) =>
-                    s.value && (
-                      <div key={s.label} className="flex justify-between gap-3">
-                        <dt className="text-slate-500">{s.label}</dt>
-                        <dd className="text-right font-medium text-slate-900">{s.value}</dd>
-                      </div>
-                    )
-                )}
-              </dl>
-            </div>
-          </div>
+      <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-sm">
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">Venda</p>
+          <p className="font-semibold text-slate-900">{formatEuro(Number(artigo.preco_venda))}</p>
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">Custo</p>
+          <CustoEditor artigoId={artigo.id} initialCusto={Number(artigo.preco_custo)} onSaved={onRefresh} />
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">Lucro</p>
+          <p className={`font-semibold ${lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+            {formatEuro(lucro)}
+          </p>
+          {margem > 0 && <p className="text-[10px] text-slate-400">{margem}% margem</p>}
+        </div>
+      </div>
 
-          <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">
-            <div>
-              <p className="text-[11px] uppercase tracking-wide text-slate-400">Venda</p>
-              <p className="font-semibold text-slate-900">{formatEuro(Number(artigo.preco_venda))}</p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-wide text-slate-400">Custo</p>
-              <CustoEditor artigoId={artigo.id} initialCusto={Number(artigo.preco_custo)} onSaved={onRefresh} />
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-wide text-slate-400">Lucro</p>
-              <p className={`font-semibold ${lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                {formatEuro(lucro)}
-              </p>
-              {margem > 0 && <p className="text-[10px] text-slate-400">{margem}% margem</p>}
-            </div>
-          </div>
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        className="mt-3 text-center text-xs font-medium text-sky-600 hover:text-sky-800"
+      >
+        {aberto ? 'Ocultar detalhes ▲' : 'Ver detalhes ▼'}
+      </button>
+
+      {aberto && (
+        <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            {specs.map(
+              (s) =>
+                s.value && (
+                  <div key={s.label} className="flex flex-col">
+                    <dt className="text-[11px] uppercase tracking-wide text-slate-400">{s.label}</dt>
+                    <dd className="font-medium text-slate-900">{s.value}</dd>
+                  </div>
+                )
+            )}
+          </dl>
 
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Descrição</p>
             <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
-              {artigo.descricao || 'Sem descrição sincronizada.'}
+              {artigo.descricao || 'Sem descrição sincronizada. Recarrega a extensão e a Vinted (F5).'}
             </p>
           </div>
-        </div>
 
-        {artigo.url_vinted && (
-          <div className="shrink-0 border-t border-slate-200 p-4">
+          {artigo.url_vinted && (
             <a
               href={artigo.url_vinted}
               target="_blank"
               rel="noopener noreferrer"
-              className="block rounded-lg bg-sky-600 py-2.5 text-center text-sm font-medium text-white hover:bg-sky-700"
+              className="block rounded-lg border border-sky-200 bg-sky-50 py-2 text-center text-xs font-medium text-sky-700 hover:bg-sky-100"
             >
               Ver anúncio na Vinted ↗
             </a>
-          </div>
-        )}
-      </div>
-    </div>
+          )}
+        </div>
+      )}
+    </article>
   )
 }
 
@@ -214,8 +212,6 @@ interface InventarioTableProps {
 }
 
 export function InventarioTable({ artigos, onRefresh }: InventarioTableProps) {
-  const [detalhe, setDetalhe] = useState<ArtigoVinted | null>(null)
-
   if (artigos.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
@@ -226,61 +222,10 @@ export function InventarioTable({ artigos, onRefresh }: InventarioTableProps) {
   }
 
   return (
-    <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {artigos.map((artigo) => {
-          const lucro = Number(artigo.lucro_bruto ?? artigo.preco_venda - artigo.preco_custo)
-          const meta = [artigo.marca, artigo.tamanho].filter(Boolean).join(' · ')
-
-          return (
-            <button
-              key={artigo.id}
-              type="button"
-              onClick={() => setDetalhe(artigo)}
-              className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-shadow hover:shadow-md"
-            >
-              <div className="flex gap-3">
-                <ArtigoFoto fotoUrl={artigo.foto_url} nome={artigo.nome} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900">
-                      {artigo.nome}
-                    </h3>
-                    <span className={statusVintedBadgeClasses(artigo.status_artigo)}>
-                      {statusVintedLabel(artigo.status_artigo)}
-                    </span>
-                  </div>
-                  {meta && <p className="mt-1 text-xs text-slate-500">{meta}</p>}
-                  {artigo.categoria && (
-                    <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-400">{artigo.categoria}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-sm">
-                <div>
-                  <p className="text-[11px] uppercase tracking-wide text-slate-400">Venda</p>
-                  <p className="font-semibold text-slate-900">{formatEuro(Number(artigo.preco_venda))}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-wide text-slate-400">Custo</p>
-                  <CustoEditor artigoId={artigo.id} initialCusto={Number(artigo.preco_custo)} onSaved={onRefresh} />
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-wide text-slate-400">Lucro</p>
-                  <p className={`font-semibold ${lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                    {formatEuro(lucro)}
-                  </p>
-                </div>
-              </div>
-
-              <span className="mt-3 block text-center text-xs font-medium text-sky-600">Ver detalhes →</span>
-            </button>
-          )
-        })}
-      </div>
-
-      <ArtigoDetailModal artigo={detalhe} onClose={() => setDetalhe(null)} onRefresh={onRefresh} />
-    </>
+    <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {artigos.map((artigo) => (
+        <ArtigoCard key={artigo.id} artigo={artigo} onRefresh={onRefresh} />
+      ))}
+    </div>
   )
 }

@@ -16,6 +16,8 @@ export async function syncToSupabase(data, syncSecret) {
       p_sync_secret: syncSecret,
       p_artigos: data.artigos || [],
       p_vendas: data.vendas || [],
+      p_compras: data.compras || [],
+      p_synced_ids: data.synced_ids || [],
     }),
   })
 
@@ -40,12 +42,14 @@ export async function syncToSupabase(data, syncSecret) {
   const parts = []
   if (json.artigos) parts.push(`${json.artigos} artigos`)
   if (json.vendas) parts.push(`${json.vendas} vendas`)
+  if (json.compras) parts.push(`${json.compras} compras`)
 
   return {
     ok: true,
     message: parts.join(', ') || 'Sync OK',
     artigos: json.artigos || 0,
     vendas: json.vendas || 0,
+    compras: json.compras || 0,
   }
 }
 
