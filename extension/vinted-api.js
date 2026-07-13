@@ -546,11 +546,12 @@ async function syncAllFromVinted() {
 
   const artigos = await fetchAllUserItems(user.id)
   await enrichActiveItems(artigos)
-  const vendas = await fetchSoldOrders()
   const compras = await fetchPurchasedOrders()
   const synced_ids = artigos.map((a) => a.id_artigo)
 
-  return { artigos, vendas, compras, synced_ids, user: user.login || user.username }
+  // Vendas já não são lidas automaticamente — são registadas ao mover
+  // uma compra para "vendidos" no dashboard.
+  return { artigos, vendas: [], compras, synced_ids, user: user.login || user.username }
 }
 
 window.__vintedHub = {

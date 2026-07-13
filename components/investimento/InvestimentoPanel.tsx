@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   eliminarCompra,
+  inicioDeOntem,
   moverParaVendido,
-  reverterParaComprado,
 } from '@/lib/investimento-queries'
 import type { Compra } from '@/lib/types'
 import { formatEuro, formatRelativeTime } from '@/lib/utils'
@@ -45,18 +45,17 @@ export default function InvestimentoPanel({
   compras: Compra[]
   onRefresh?: () => void
 }) {
-  const [aba, setAba] = useState<'stock' | 'vendidos'>('stock')
   const [busyId, setBusyId] = useState<string | null>(null)
 
-  const stock = useMemo(() => compras.filter((c) => c.estado === 'comprado'), [compras])
-  const vendidos = useMemo(() => compras.filter((c) => c.estado === 'vendido'), [compras])
+  // Só o que comprei desde ontem e ainda está em stock.
+  const recentes = useMemo(() => {
+    const limite = inicioDeOntem().getTime()
+    return compras
+      .filter((c) => c.estado === 'comprado' && new Date(c.data_compra).getTime() >= limite)
+      .sort((a, b) => new Date(b.data_compra).getTime() - new Date(a.data_compra).getTime())
+  }, [compras])
 
-  const investidoStock = stock.reduce((s, c) => s + Number(c.preco_compra), 0)
-  const investidoTotal = compras.reduce((s, c) => s + Number(c.preco_compra), 0)
-  const lucroRealizado = vendidos.reduce(
-    (s, c) => s + (Number(c.preco_venda ?? 0) - Number(c.preco_compra)),
-    0
-  )
+  const investido = recentes.reduce((s, c) => s + Number(c.preco_compra), 0)
 
   async function handleMover(compra: Compra) {
     const input = prompt(
@@ -75,14 +74,6 @@ export default function InvestimentoPanel({
     onRefresh?.()
   }
 
-  async function handleReverter(compra: Compra) {
-    setBusyId(compra.id)
-    const supabase = createClient()
-    await reverterParaComprado(supabase, compra.id)
-    setBusyId(null)
-    onRefresh?.()
-  }
-
   async function handleEliminar(compra: Compra) {
     if (!confirm(`Eliminar "${compra.titulo}" do investimento?`)) return
     setBusyId(compra.id)
@@ -92,73 +83,31 @@ export default function InvestimentoPanel({
     onRefresh?.()
   }
 
-  const lista = aba === 'stock' ? stock : vendidos
-
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
         <MetricCard
-          label="Investido em stock"
-          value={formatEuro(investidoStock)}
+          label="Investido (desde ontem)"
+          value={formatEuro(investido)}
           accent="border-violet-200 bg-violet-50 text-violet-700"
         />
         <MetricCard
-          label="Peças em stock"
-          value={String(stock.length)}
+          label="Compras recentes"
+          value={String(recentes.length)}
           accent="border-sky-200 bg-sky-50 text-sky-700"
         />
-        <MetricCard
-          label="Investido total"
-          value={formatEuro(investidoTotal)}
-          accent="border-slate-200 bg-slate-50 text-slate-700"
-        />
-        <MetricCard
-          label="Lucro realizado"
-          value={formatEuro(lucroRealizado)}
-          accent="border-emerald-200 bg-emerald-50 text-emerald-700"
-        />
       </div>
 
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => setAba('stock')}
-          className={`rounded-lg px-3 py-2 text-sm font-medium ${
-            aba === 'stock'
-              ? 'bg-slate-900 text-white'
-              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-          }`}
-        >
-          Em stock ({stock.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setAba('vendidos')}
-          className={`rounded-lg px-3 py-2 text-sm font-medium ${
-            aba === 'vendidos'
-              ? 'bg-slate-900 text-white'
-              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-          }`}
-        >
-          Vendidos ({vendidos.length})
-        </button>
-      </div>
-
-      {lista.length === 0 ? (
+      {recentes.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
-          <p className="text-sm font-medium text-slate-700">
-            {aba === 'stock' ? 'Sem peças em stock.' : 'Ainda não marcaste nenhuma peça como vendida.'}
-          </p>
+          <p className="text-sm font-medium text-slate-700">Sem compras desde ontem.</p>
           <p className="mt-1 text-sm text-slate-500">
-            {aba === 'stock'
-              ? 'As tuas compras na Vinted aparecem aqui automaticamente.'
-              : 'Em "Em stock", carrega em "Mover p/ vendidos" e indica o preço de venda.'}
+            As tuas compras mais recentes na Vinted aparecem aqui automaticamente.
           </p>
         </div>
       ) : (
         <div className="grid gap-3">
-          {lista.map((compra) => {
-            const lucro = Number(compra.preco_venda ?? 0) - Number(compra.preco_compra)
+          {recentes.map((compra) => {
             const busy = busyId === compra.id
             return (
               <article
@@ -172,40 +121,17 @@ export default function InvestimentoPanel({
                     Comprado {formatRelativeTime(compra.data_compra)} ·{' '}
                     {formatEuro(Number(compra.preco_compra))}
                   </p>
-                  {compra.estado === 'vendido' && (
-                    <p className="mt-0.5 text-xs">
-                      <span className="text-slate-500">Vendido por </span>
-                      <span className="font-medium text-slate-800">
-                        {formatEuro(Number(compra.preco_venda ?? 0))}
-                      </span>
-                      <span className={`ml-1.5 font-semibold ${lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                        ({lucro >= 0 ? '+' : ''}
-                        {formatEuro(lucro)})
-                      </span>
-                    </p>
-                  )}
                 </div>
 
                 <div className="flex shrink-0 flex-col gap-1.5">
-                  {compra.estado === 'comprado' ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => handleMover(compra)}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      Mover p/ vendidos
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => handleReverter(compra)}
-                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                    >
-                      Repor em stock
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => handleMover(compra)}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    Mover p/ vendidos
+                  </button>
                   <button
                     type="button"
                     disabled={busy}

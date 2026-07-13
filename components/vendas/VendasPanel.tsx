@@ -1,9 +1,10 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import type { Venda } from '@/lib/types'
+import type { Compra } from '@/lib/types'
 import { formatEuro, formatRelativeTime } from '@/lib/utils'
-import { isHoje, somarVendas, totalHoje } from '@/lib/vendas-queries'
+import { isHoje } from '@/lib/vendas-queries'
+import { somarLucro, somarVendaPreco, vendidosHoje } from '@/lib/investimento-queries'
 
 function VendaFoto({ fotoUrl, titulo }: { fotoUrl: string | null; titulo: string }) {
   if (fotoUrl) {
@@ -41,15 +42,15 @@ function MetricCard({
   )
 }
 
-export default function VendasPanel({ vendas }: { vendas: Venda[] }) {
+export default function VendasPanel({ vendas }: { vendas: Compra[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const totalGeral = useMemo(() => somarVendas(vendas), [vendas])
-  const totalDeHoje = useMemo(() => totalHoje(vendas), [vendas])
-  const totalSelecionado = useMemo(
-    () => somarVendas(vendas.filter((v) => selected.has(v.id))),
-    [vendas, selected]
-  )
+  const totalGeral = useMemo(() => somarVendaPreco(vendas), [vendas])
+  const totalDeHoje = useMemo(() => vendidosHoje(vendas), [vendas])
+  const lucroTotal = useMemo(() => somarLucro(vendas), [vendas])
+  const selecionadas = useMemo(() => vendas.filter((v) => selected.has(v.id)), [vendas, selected])
+  const totalSelecionado = useMemo(() => somarVendaPreco(selecionadas), [selecionadas])
+  const lucroSelecionado = useMemo(() => somarLucro(selecionadas), [selecionadas])
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -70,7 +71,7 @@ export default function VendasPanel({ vendas }: { vendas: Venda[] }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <MetricCard
           label="Total ganho"
           value={formatEuro(totalGeral)}
@@ -82,9 +83,14 @@ export default function VendasPanel({ vendas }: { vendas: Venda[] }) {
           accent="border-sky-200 bg-sky-50 text-sky-700"
         />
         <MetricCard
+          label="Lucro realizado"
+          value={formatEuro(lucroTotal)}
+          accent="border-violet-200 bg-violet-50 text-violet-700"
+        />
+        <MetricCard
           label={`Vendas (${vendas.length})`}
           value={String(vendas.length)}
-          accent="border-violet-200 bg-violet-50 text-violet-700"
+          accent="border-slate-200 bg-slate-50 text-slate-700"
         />
       </div>
 
@@ -93,6 +99,10 @@ export default function VendasPanel({ vendas }: { vendas: Venda[] }) {
           <p className="text-sm text-amber-900">
             <strong>{selected.size}</strong> selecionadas ={' '}
             <strong>{formatEuro(totalSelecionado)}</strong>
+            <span className="ml-2 text-amber-700">
+              (lucro {lucroSelecionado >= 0 ? '+' : ''}
+              {formatEuro(lucroSelecionado)})
+            </span>
           </p>
           <button
             type="button"
@@ -106,9 +116,10 @@ export default function VendasPanel({ vendas }: { vendas: Venda[] }) {
 
       {vendas.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center">
-          <p className="text-sm font-medium text-slate-700">Ainda não há vendas sincronizadas.</p>
+          <p className="text-sm font-medium text-slate-700">Ainda não há vendas registadas.</p>
           <p className="mt-1 text-sm text-slate-500">
-            Mantém a Vinted aberta com a extensão activa — as vendas são lidas automaticamente.
+            Vai a <strong>Investimento</strong>, carrega em &quot;Mover p/ vendidos&quot; e indica o
+            preço de venda — a peça aparece aqui.
           </p>
         </div>
       ) : (
@@ -130,6 +141,8 @@ export default function VendasPanel({ vendas }: { vendas: Venda[] }) {
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             {vendas.map((venda) => {
               const checked = selected.has(venda.id)
+              const preco = Number(venda.preco_venda ?? 0)
+              const lucro = preco - Number(venda.preco_compra)
               return (
                 <label
                   key={venda.id}
@@ -147,18 +160,29 @@ export default function VendasPanel({ vendas }: { vendas: Venda[] }) {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-slate-900">{venda.titulo}</p>
                     <p className="text-xs text-slate-500">
-                      {venda.comprador ? `@${venda.comprador} · ` : ''}
-                      {formatRelativeTime(venda.data_venda)}
-                      {isHoje(venda.data_venda) && (
-                        <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
-                          hoje
-                        </span>
+                      Comprado {formatEuro(Number(venda.preco_compra))}
+                      {venda.data_venda && (
+                        <>
+                          {' · '}
+                          {formatRelativeTime(venda.data_venda)}
+                          {isHoje(venda.data_venda) && (
+                            <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
+                              hoje
+                            </span>
+                          )}
+                        </>
                       )}
                     </p>
                   </div>
-                  <span className="shrink-0 text-sm font-semibold text-emerald-700">
-                    {formatEuro(Number(venda.preco))}
-                  </span>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-semibold text-emerald-700">{formatEuro(preco)}</p>
+                    <p
+                      className={`text-xs font-medium ${lucro >= 0 ? 'text-emerald-600' : 'text-red-600'}`}
+                    >
+                      {lucro >= 0 ? '+' : ''}
+                      {formatEuro(lucro)}
+                    </p>
+                  </div>
                 </label>
               )
             })}

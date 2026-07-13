@@ -40,13 +40,13 @@ export default function InvestimentoPageClient() {
         </div>
       ) : (
         <>
-          <AutoRefresh intervalMs={15000} onRefresh={load} />
+          <AutoRefresh intervalMs={10000} onRefresh={load} />
           <div className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">Investimento</h2>
               <p className="mt-1 text-sm text-slate-500">
-                As tuas compras na Vinted, sincronizadas automaticamente. Marca uma peça como vendida
-                para registares o lucro.
+                As tuas compras desde ontem, sempre atualizadas. Carrega em &quot;Mover p/
+                vendidos&quot; e indica o preço — a peça vai direta para a aba Vendas.
               </p>
             </div>
 

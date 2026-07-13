@@ -1,10 +1,10 @@
 'use client'
 
 import { useMemo } from 'react'
-import type { Compra, Venda } from '@/lib/types'
+import type { Compra } from '@/lib/types'
 import { calcularAnalytics, calcularSemanas } from '@/lib/analytics'
 import { formatEuro } from '@/lib/utils'
-import { somarVendas, totalHoje } from '@/lib/vendas-queries'
+import { vendidosHoje } from '@/lib/investimento-queries'
 
 function Metric({
   label,
@@ -26,21 +26,14 @@ function Metric({
   )
 }
 
-export default function AnalyticsPanel({
-  compras,
-  vendas,
-}: {
-  compras: Compra[]
-  vendas: Venda[]
-}) {
+export default function AnalyticsPanel({ compras }: { compras: Compra[] }) {
   const a = useMemo(() => calcularAnalytics(compras), [compras])
   const semanas = useMemo(() => calcularSemanas(compras, 8), [compras])
 
-  const receitaVinted = somarVendas(vendas)
-  const receitaVintedHoje = totalHoje(vendas)
+  const receitaHoje = useMemo(() => vendidosHoje(compras), [compras])
 
   const maxLucro = Math.max(1, ...semanas.map((s) => Math.abs(s.lucro)))
-  const semDados = compras.length === 0 && vendas.length === 0
+  const semDados = compras.length === 0
 
   if (semDados) {
     return (
@@ -74,9 +67,9 @@ export default function AnalyticsPanel({
           accent="border-violet-200 bg-violet-50 text-violet-800"
         />
         <Metric
-          label="Receita vendas Vinted"
-          value={formatEuro(receitaVinted)}
-          sub={`Hoje: ${formatEuro(receitaVintedHoje)}`}
+          label="Receita de vendas"
+          value={formatEuro(a.receitaVendas)}
+          sub={`Hoje: ${formatEuro(receitaHoje)}`}
           accent="border-sky-200 bg-sky-50 text-sky-800"
         />
       </div>

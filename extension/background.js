@@ -8,7 +8,7 @@ import {
 } from './sync.js'
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vinted Hub Sync v2.3 instalada')
+  console.log('Vinted Hub Sync v2.4 instalada')
   chrome.storage.local.set({ autoSyncEnabled: true })
 })
 

@@ -6,25 +6,19 @@ import AutoRefresh from '@/components/layout/AutoRefresh'
 import AnalyticsPanel from '@/components/analytics/AnalyticsPanel'
 import { createClient } from '@/lib/supabase/client'
 import { loadInvestimento } from '@/lib/investimento-queries'
-import { loadVendas } from '@/lib/vendas-queries'
 import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
-import type { Compra, Venda } from '@/lib/types'
+import type { Compra } from '@/lib/types'
 
 export default function AnalyticsPageClient() {
   const [compras, setCompras] = useState<Compra[]>([])
-  const [vendas, setVendas] = useState<Venda[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     const supabase = createClient()
     try {
-      const [c, v] = await Promise.all([
-        loadInvestimento(supabase),
-        loadVendas(supabase).catch(() => [] as Venda[]),
-      ])
+      const c = await loadInvestimento(supabase)
       setCompras(c)
-      setVendas(v)
       setError(null)
     } catch {
       setError('Executa supabase/sync-rpc.sql no Supabase para ativar a análise.')
@@ -32,7 +26,7 @@ export default function AnalyticsPageClient() {
     setLoading(false)
   }, [])
 
-  useSupabaseRealtime(load, ['investimento', 'vendas'])
+  useSupabaseRealtime(load, ['investimento'])
 
   useEffect(() => {
     load()
@@ -61,7 +55,7 @@ export default function AnalyticsPageClient() {
               </div>
             )}
 
-            <AnalyticsPanel compras={compras} vendas={vendas} />
+            <AnalyticsPanel compras={compras} />
           </div>
         </>
       )}

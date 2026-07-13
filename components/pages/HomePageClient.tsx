@@ -4,16 +4,16 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import AppShell from '@/components/layout/AppShell'
 import { createClient } from '@/lib/supabase/client'
-import type { InboxCounts, Venda } from '@/lib/types'
+import type { Compra, InboxCounts } from '@/lib/types'
 import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
 import { calcularMetricasVinted, formatEuro } from '@/lib/utils'
 import { getInboxCounts } from '@/lib/inbox-queries'
-import { loadVendas, somarVendas, totalHoje } from '@/lib/vendas-queries'
+import { loadVendidos, somarVendaPreco, vendidosHoje } from '@/lib/investimento-queries'
 
 export default function HomePageClient() {
   const [inboxCounts, setInboxCounts] = useState<InboxCounts>({ total: 0 })
   const [vintedMetrics, setVintedMetrics] = useState(calcularMetricasVinted([]))
-  const [vendas, setVendas] = useState<Venda[]>([])
+  const [vendas, setVendas] = useState<Compra[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -22,7 +22,7 @@ export default function HomePageClient() {
     const [vintedResult, counts, vendasRows] = await Promise.all([
       supabase.from('artigos_vinted_com_lucro').select('*'),
       getInboxCounts(supabase),
-      loadVendas(supabase).catch(() => [] as Venda[]),
+      loadVendidos(supabase).catch(() => [] as Compra[]),
     ])
 
     setInboxCounts(counts)
@@ -45,10 +45,10 @@ export default function HomePageClient() {
     load()
   }, [load])
 
-  useSupabaseRealtime(load, ['conversas', 'artigos_vinted', 'vendas'])
+  useSupabaseRealtime(load, ['conversas', 'artigos_vinted', 'investimento'])
 
-  const ganhoTotal = somarVendas(vendas)
-  const ganhoHoje = totalHoje(vendas)
+  const ganhoTotal = somarVendaPreco(vendas)
+  const ganhoHoje = vendidosHoje(vendas)
 
   if (loading) {
     return (
