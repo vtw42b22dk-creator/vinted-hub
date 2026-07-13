@@ -29,6 +29,53 @@ CREATE POLICY "pastas_delete" ON public.pastas_conversas FOR DELETE USING (user_
 
 ALTER TABLE public.conversas ADD COLUMN IF NOT EXISTS pasta_id UUID REFERENCES public.pastas_conversas(id) ON DELETE SET NULL;
 
+-- Detalhe do artigo (para o modal do inventário)
+ALTER TABLE public.artigos_vinted ADD COLUMN IF NOT EXISTS descricao TEXT;
+ALTER TABLE public.artigos_vinted ADD COLUMN IF NOT EXISTS categoria TEXT;
+
+-- Recriar a view para incluir as colunas novas
+DROP VIEW IF EXISTS public.artigos_vinted_com_lucro;
+CREATE VIEW public.artigos_vinted_com_lucro AS
+SELECT
+  *,
+  (preco_venda - preco_custo) AS lucro_bruto,
+  CASE
+    WHEN preco_venda > 0 THEN ROUND(((preco_venda - preco_custo) / preco_venda) * 100, 1)
+    ELSE 0
+  END AS margem_percentual
+FROM public.artigos_vinted;
+
+-- Vendas concluídas (my_orders?order_type=sold)
+CREATE TABLE IF NOT EXISTS public.vendas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  id_venda TEXT NOT NULL,
+  titulo TEXT NOT NULL DEFAULT 'Venda',
+  preco NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  comprador TEXT,
+  foto_url TEXT,
+  url_venda TEXT,
+  id_artigo TEXT,
+  data_venda TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sincronizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT vendas_user_venda_unique UNIQUE (user_id, id_venda)
+);
+
+ALTER TABLE public.vendas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "vendas_own" ON public.vendas;
+CREATE POLICY "vendas_own" ON public.vendas
+  FOR ALL USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE INDEX IF NOT EXISTS idx_vendas_user_data ON public.vendas (user_id, data_venda DESC);
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.vendas;
+EXCEPTION WHEN duplicate_object OR undefined_object THEN
+  NULL;
+END $$;
+
 -- Limpar dados demo antigos (causavam artigos repetidos)
 DELETE FROM public.conversas WHERE id_vinted IN ('conv-001','conv-002','conv-003','conv-004','conv-005');
 DELETE FROM public.artigos_vinted WHERE id_artigo IN ('100001','100002','100003','100004','100005');
@@ -67,11 +114,13 @@ BEGIN
 END;
 $$;
 
--- Sync automático: SÓ artigos (inventário). Conversas são adicionadas manualmente.
+-- Sync automático: inventário (artigos à venda) + vendas concluídas.
+DROP FUNCTION IF EXISTS public.sync_from_vinted(text, jsonb, jsonb);
+
 CREATE OR REPLACE FUNCTION public.sync_from_vinted(
   p_sync_secret text,
   p_artigos jsonb DEFAULT '[]'::jsonb,
-  p_conversas jsonb DEFAULT '[]'::jsonb
+  p_vendas jsonb DEFAULT '[]'::jsonb
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -81,35 +130,59 @@ AS $$
 DECLARE
   v_user_id uuid;
   v_artigos int := 0;
+  v_vendas int := 0;
   a jsonb;
+  s jsonb;
 BEGIN
   SELECT id INTO v_user_id FROM public.profiles WHERE sync_secret = p_sync_secret;
   IF v_user_id IS NULL THEN
-    RAISE EXCEPTION 'Sync secret inválido — copia de /setup no dashboard';
+    RAISE EXCEPTION 'Sync secret inválido — abre o dashboard com login';
   END IF;
 
   FOR a IN SELECT value FROM jsonb_array_elements(COALESCE(p_artigos, '[]'::jsonb))
   LOOP
     INSERT INTO public.artigos_vinted (
       user_id, id_artigo, nome, marca, tamanho, preco_venda, status_artigo,
-      foto_url, url_vinted, sincronizado_em, atualizado_em
+      foto_url, url_vinted, descricao, categoria, sincronizado_em, atualizado_em
     ) VALUES (
       v_user_id, a->>'id_artigo', COALESCE(a->>'nome', 'Sem nome'),
       NULLIF(a->>'marca', ''), NULLIF(a->>'tamanho', ''),
       COALESCE((a->>'preco_venda')::numeric, 0),
       CASE WHEN COALESCE(a->>'status_artigo', 'ativo') IN ('ativo','reservado','vendido','rascunho','oculto')
         THEN COALESCE(a->>'status_artigo', 'ativo')::status_artigo_vinted ELSE 'ativo'::status_artigo_vinted END,
-      NULLIF(a->>'foto_url', ''), NULLIF(a->>'url_vinted', ''), now(), now()
+      NULLIF(a->>'foto_url', ''), NULLIF(a->>'url_vinted', ''),
+      NULLIF(a->>'descricao', ''), NULLIF(a->>'categoria', ''), now(), now()
     )
     ON CONFLICT (user_id, id_artigo) DO UPDATE SET
       nome = EXCLUDED.nome, marca = EXCLUDED.marca, tamanho = EXCLUDED.tamanho,
       preco_venda = EXCLUDED.preco_venda, status_artigo = EXCLUDED.status_artigo,
       foto_url = EXCLUDED.foto_url, url_vinted = EXCLUDED.url_vinted,
+      descricao = COALESCE(EXCLUDED.descricao, artigos_vinted.descricao),
+      categoria = COALESCE(EXCLUDED.categoria, artigos_vinted.categoria),
       sincronizado_em = now(), atualizado_em = now();
     v_artigos := v_artigos + 1;
   END LOOP;
 
-  RETURN jsonb_build_object('ok', true, 'artigos', v_artigos, 'conversas', 0);
+  FOR s IN SELECT value FROM jsonb_array_elements(COALESCE(p_vendas, '[]'::jsonb))
+  LOOP
+    CONTINUE WHEN s->>'id_venda' IS NULL;
+    INSERT INTO public.vendas (
+      user_id, id_venda, titulo, preco, comprador, foto_url, url_venda, id_artigo, data_venda
+    ) VALUES (
+      v_user_id, s->>'id_venda', COALESCE(NULLIF(s->>'titulo', ''), 'Venda'),
+      COALESCE((s->>'preco')::numeric, 0), NULLIF(s->>'comprador', ''),
+      NULLIF(s->>'foto_url', ''), NULLIF(s->>'url_venda', ''),
+      NULLIF(s->>'id_artigo', ''), COALESCE((s->>'data_venda')::timestamptz, now())
+    )
+    ON CONFLICT (user_id, id_venda) DO UPDATE SET
+      titulo = EXCLUDED.titulo, preco = EXCLUDED.preco, comprador = EXCLUDED.comprador,
+      foto_url = EXCLUDED.foto_url, url_venda = EXCLUDED.url_venda,
+      id_artigo = EXCLUDED.id_artigo, data_venda = EXCLUDED.data_venda,
+      sincronizado_em = now();
+    v_vendas := v_vendas + 1;
+  END LOOP;
+
+  RETURN jsonb_build_object('ok', true, 'artigos', v_artigos, 'vendas', v_vendas);
 END;
 $$;
 

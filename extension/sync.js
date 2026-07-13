@@ -15,7 +15,7 @@ export async function syncToSupabase(data, syncSecret) {
     body: JSON.stringify({
       p_sync_secret: syncSecret,
       p_artigos: data.artigos || [],
-      p_conversas: data.conversas || [],
+      p_vendas: data.vendas || [],
     }),
   })
 
@@ -39,13 +39,13 @@ export async function syncToSupabase(data, syncSecret) {
 
   const parts = []
   if (json.artigos) parts.push(`${json.artigos} artigos`)
-  if (json.conversas) parts.push(`${json.conversas} conversas`)
+  if (json.vendas) parts.push(`${json.vendas} vendas`)
 
   return {
     ok: true,
     message: parts.join(', ') || 'Sync OK',
     artigos: json.artigos || 0,
-    conversas: json.conversas || 0,
+    vendas: json.vendas || 0,
   }
 }
 

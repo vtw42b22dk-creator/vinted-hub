@@ -75,6 +75,8 @@ export interface ArtigoVinted {
   preco_venda: number
   preco_custo: number
   status_artigo: StatusArtigoVinted
+  descricao: string | null
+  categoria: string | null
   foto_url: string | null
   url_vinted: string | null
   sincronizado_em: string
@@ -82,6 +84,19 @@ export interface ArtigoVinted {
   criado_em: string
   lucro_bruto?: number
   margem_percentual?: number
+}
+
+export interface Venda {
+  id: string
+  id_venda: string
+  titulo: string
+  preco: number
+  comprador: string | null
+  foto_url: string | null
+  url_venda: string | null
+  id_artigo: string | null
+  data_venda: string
+  criado_em: string
 }
 
 export interface InventarioMetrics {

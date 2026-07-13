@@ -1,6 +1,20 @@
 // Cliente da API interna Vinted (usa cookies da sessão do browser)
 
 const MESSAGE_FETCH_MAX = 30
+const ITEM_DETAIL_CONCURRENCY = 5
+const ITEM_DETAIL_MAX = 200
+
+async function runPool(items, worker, concurrency = ITEM_DETAIL_CONCURRENCY) {
+  let cursor = 0
+  async function runWorker() {
+    while (cursor < items.length) {
+      const index = cursor++
+      await worker(items[index], index)
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker())
+  await Promise.all(workers)
+}
 
 function getCsrfToken() {
   return (
@@ -90,6 +104,8 @@ function mapItem(item, sourceUrl) {
     tamanho: item.size_title || item.size?.title || null,
     preco_venda: parsePrice(item.price || item.total_item_price || item.price_amount),
     status_artigo: mapItemStatus(item, urlHint),
+    descricao: item.description ? String(item.description).trim() : null,
+    categoria: extractCategoria(item),
     foto_url:
       item.photo?.url ||
       item.photo?.full_size_url ||
@@ -98,6 +114,142 @@ function mapItem(item, sourceUrl) {
       null,
     url_vinted: item.url || `${domain}/items/${id}`,
   }
+}
+
+function extractCategoria(item) {
+  const branch = item.catalog_branch_title || item.catalog_branch || item.breadcrumbs
+  if (Array.isArray(branch)) {
+    return branch.map((b) => (typeof b === 'string' ? b : b?.title)).filter(Boolean).join(' / ') || null
+  }
+  return (
+    item.catalog_branch_title ||
+    item.category_title ||
+    item.catalog_title ||
+    item.category?.title ||
+    item.catalog?.title ||
+    null
+  )
+}
+
+async function fetchItemDetail(itemId) {
+  try {
+    const data = await vintedFetch(`/api/v2/items/${itemId}`)
+    return data.item || data
+  } catch {
+    return null
+  }
+}
+
+// Enriquece os artigos à venda com descrição/categoria (detalhe de cada anúncio)
+async function enrichActiveItems(artigos) {
+  const active = artigos
+    .filter((a) => a.status_artigo === 'ativo' || a.status_artigo === 'reservado')
+    .slice(0, ITEM_DETAIL_MAX)
+
+  await runPool(active, async (a) => {
+    const detail = await fetchItemDetail(a.id_artigo)
+    if (!detail) return
+    const desc = String(detail.description || detail.body || '').trim()
+    if (desc) a.descricao = desc
+    const cat = extractCategoria(detail)
+    if (cat) a.categoria = cat
+    if (!a.preco_venda) a.preco_venda = parsePrice(detail.price || detail.total_item_price)
+    if (!a.marca) a.marca = detail.brand_title || detail.brand?.title || a.marca
+    if (!a.tamanho) a.tamanho = detail.size_title || detail.size?.title || a.tamanho
+  })
+
+  return artigos
+}
+
+// ---------- Vendas (my_orders?order_type=sold) ----------
+
+function mapVenda(order) {
+  const id =
+    order.id ?? order.transaction_id ?? order.transaction?.id ?? order.order_id ?? order.item_id
+  if (id == null) return null
+
+  const buyer = order.buyer || order.user || order.opposite_user || order.transaction?.buyer || {}
+  const item = order.item || order.transaction?.item || {}
+  const itemId = order.item_id ?? item.id ?? order.transaction?.item_id ?? null
+
+  const foto =
+    order.photo?.url ||
+    order.image_url ||
+    order.thumbnail_url ||
+    item.photo?.url ||
+    (Array.isArray(order.item_photos) ? order.item_photos[0]?.url : null) ||
+    null
+
+  const preco = parsePrice(
+    order.price ??
+      order.item_price ??
+      order.total_item_price ??
+      order.transaction?.item_price ??
+      order.amount ??
+      item.price
+  )
+
+  let data =
+    order.date ||
+    order.completed_at ||
+    order.sold_at ||
+    order.updated_at ||
+    order.transaction?.updated_at ||
+    order.created_at ||
+    new Date().toISOString()
+  if (typeof data === 'number') {
+    data = new Date(data * (data < 1e12 ? 1000 : 1)).toISOString()
+  }
+
+  return {
+    id_venda: String(id),
+    titulo: order.title || order.item_title || item.title || 'Venda',
+    preco,
+    comprador: buyer.login || buyer.username || null,
+    foto_url: foto,
+    url_venda: itemId != null ? `${window.location.origin}/items/${itemId}` : null,
+    id_artigo: itemId != null ? String(itemId) : null,
+    data_venda: data,
+  }
+}
+
+async function fetchSoldOrders() {
+  const collected = []
+  const seen = new Set()
+
+  const builders = [
+    (p) => `/api/v2/my_orders?type=sold&page=${p}&per_page=20`,
+    (p) => `/api/v2/my_orders?order_type=sold&page=${p}&per_page=20`,
+  ]
+
+  for (const build of builders) {
+    try {
+      let page = 1
+      while (page <= 25) {
+        const data = await vintedFetch(build(page))
+        const orders =
+          data.my_orders || data.orders || data.items || data.transactions || []
+        if (!orders.length) break
+
+        for (const o of orders) {
+          const v = mapVenda(o)
+          if (v && !seen.has(v.id_venda)) {
+            seen.add(v.id_venda)
+            collected.push(v)
+          }
+        }
+
+        const totalPages = data.pagination?.total_pages || 1
+        if (page >= totalPages) break
+        page++
+      }
+      if (collected.length) break
+    } catch {
+      // tentar próximo endpoint
+    }
+  }
+
+  return collected
 }
 
 function mapItemStatus(item, urlHint) {
@@ -329,12 +481,16 @@ async function syncAllFromVinted() {
   }
 
   const artigos = await fetchAllUserItems(user.id)
-  return { artigos, conversas: [], user: user.login || user.username }
+  await enrichActiveItems(artigos)
+  const vendas = await fetchSoldOrders()
+
+  return { artigos, vendas, user: user.login || user.username }
 }
 
 window.__vintedHub = {
   syncAllFromVinted,
   fetchAllUserItems,
+  fetchSoldOrders,
   fetchCurrentUser,
   fetchConversationMessages,
   buildConversaManual,

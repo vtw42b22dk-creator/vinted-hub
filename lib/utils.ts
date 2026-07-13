@@ -111,22 +111,3 @@ export function calcularMetricasVinted(artigos: ArtigoVinted[]) {
     lucroRealizado,
   }
 }
-
-export function filtrarArtigosInventario(
-  artigos: ArtigoVinted[],
-  filtro: 'a_venda' | 'vendidos' | 'todos'
-) {
-  if (filtro === 'vendidos') {
-    return artigos
-      .filter((a) => a.status_artigo === 'vendido')
-      .sort((a, b) => new Date(b.atualizado_em).getTime() - new Date(a.atualizado_em).getTime())
-  }
-  if (filtro === 'a_venda') {
-    return artigos
-      .filter((a) => a.status_artigo === 'ativo' || a.status_artigo === 'reservado')
-      .sort((a, b) => new Date(b.atualizado_em).getTime() - new Date(a.atualizado_em).getTime())
-  }
-  return [...artigos].sort(
-    (a, b) => new Date(b.atualizado_em).getTime() - new Date(a.atualizado_em).getTime()
-  )
-}

@@ -1,28 +1,22 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useCallback, useEffect, useState } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import AutoRefresh from '@/components/layout/AutoRefresh'
-import {
-  InventarioFilters,
-  InventarioMetricsCards,
-  InventarioTable,
-} from '@/components/inventario/InventarioPanel'
+import { InventarioMetricsCards, InventarioTable } from '@/components/inventario/InventarioPanel'
 import { createClient } from '@/lib/supabase/client'
 import type { ArtigoVinted } from '@/lib/types'
-import { calcularMetricasVinted, filtrarArtigosInventario } from '@/lib/utils'
+import { calcularMetricasVinted } from '@/lib/utils'
 import { useSupabaseRealtime } from '@/lib/useSupabaseRealtime'
 
-type FiltroInventario = 'a_venda' | 'vendidos' | 'todos'
+// Só mostra o que está atualmente à venda
+function apenasAVenda(artigos: ArtigoVinted[]): ArtigoVinted[] {
+  return artigos
+    .filter((a) => a.status_artigo === 'ativo' || a.status_artigo === 'reservado')
+    .sort((a, b) => new Date(b.atualizado_em).getTime() - new Date(a.atualizado_em).getTime())
+}
 
-function InventarioContent() {
-  const searchParams = useSearchParams()
-  const filtroRaw = searchParams.get('filtro') ?? 'a_venda'
-  const filtro: FiltroInventario = ['a_venda', 'vendidos', 'todos'].includes(filtroRaw)
-    ? (filtroRaw as FiltroInventario)
-    : 'a_venda'
-
+export default function InventarioPageClient() {
   const [todos, setTodos] = useState<ArtigoVinted[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -47,59 +41,38 @@ function InventarioContent() {
 
   useSupabaseRealtime(load, ['artigos_vinted'])
 
-  const artigos = filtrarArtigosInventario(todos, filtro)
-  const metrics = calcularMetricasVinted(todos)
-  const filterCounts = {
-    a_venda: filtrarArtigosInventario(todos, 'a_venda').length,
-    vendidos: filtrarArtigosInventario(todos, 'vendidos').length,
-    todos: todos.length,
-  }
+  const artigos = apenasAVenda(todos)
+  const metrics = calcularMetricasVinted(artigos)
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <p className="text-sm text-slate-500">A carregar…</p>
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <AutoRefresh intervalMs={5000} onRefresh={load} />
-      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">Inventário Auto-Sync</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Valor potencial = soma dos preços dos artigos ainda à venda
-          </p>
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {error}
-          </div>
-        )}
-
-        <InventarioMetricsCards metrics={metrics} />
-        <InventarioFilters filtroAtivo={filtro} counts={filterCounts} />
-        <InventarioTable artigos={artigos} onRefresh={load} />
-      </div>
-    </>
-  )
-}
-
-export default function InventarioPageClient() {
   return (
     <AppShell>
-      <Suspense
-        fallback={
-          <div className="flex min-h-[40vh] items-center justify-center">
-            <p className="text-sm text-slate-500">A carregar…</p>
+      {loading ? (
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <p className="text-sm text-slate-500">A carregar…</p>
+        </div>
+      ) : (
+        <>
+          <AutoRefresh intervalMs={10000} onRefresh={load} />
+          <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">Inventário</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Artigos atualmente à venda — atualiza sozinho quando adicionas ou vendes algo. Clica
+                num anúncio para ver os detalhes.
+              </p>
+            </div>
+
+            {error && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {error}
+              </div>
+            )}
+
+            <InventarioMetricsCards metrics={metrics} />
+            <InventarioTable artigos={artigos} onRefresh={load} />
           </div>
-        }
-      >
-        <InventarioContent />
-      </Suspense>
+        </>
+      )}
     </AppShell>
   )
 }
